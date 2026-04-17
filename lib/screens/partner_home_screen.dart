@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import 'call_screen.dart';
 import 'login_screen.dart';
+import 'room_detail_screen.dart';
 
 class PartnerHomeScreen extends StatefulWidget {
   const PartnerHomeScreen({super.key});
@@ -19,6 +20,9 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   bool _isOnCall = false;
   String? _incomingCallerName;
   String? _incomingCallerId;
+  List<Map<String, dynamic>> _rooms = [];
+  bool _roomsLoading = true;
+  String? _roomsError;
 
   @override
   void initState() {
@@ -50,6 +54,8 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
         });
       }
     });
+
+    _loadRooms();
   }
 
   @override
@@ -78,6 +84,47 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
       _incomingCallerId = null;
       _incomingCallerName = null;
     });
+  }
+
+  Future<void> _loadRooms() async {
+    setState(() {
+      _roomsLoading = true;
+      _roomsError = null;
+    });
+
+    try {
+      final rooms = await ApiService.getRooms();
+      if (!mounted) return;
+      setState(() {
+        _rooms = rooms.map((room) => Map<String, dynamic>.from(room as Map<String, dynamic>)).toList();
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _roomsError = e.toString();
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _roomsLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _joinPartnerSeat(String roomId) async {
+    try {
+      await ApiService.joinRoom(roomId: roomId, role: 'femaleSpeaker');
+      await _loadRooms();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Joined room as partner speaker')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    }
   }
 
   Future<void> _logout() async {
@@ -170,6 +217,82 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
               ),
             if (_incomingCallerName == null)
               const Text('Waiting for user calls…', style: TextStyle(color: Colors.white54, fontSize: 16)),
+            const SizedBox(height: 24),
+            const Text('Available Rooms', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            if (_roomsLoading)
+              const Center(child: CircularProgressIndicator())
+            else if (_roomsError != null)
+              Text(_roomsError!, style: const TextStyle(color: Colors.redAccent))
+            else if (_rooms.isEmpty)
+              const Text('No active rooms at the moment.', style: TextStyle(color: Colors.white54))
+            else
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.only(top: 12),
+                  itemCount: _rooms.length,
+                  itemBuilder: (context, index) {
+                    final room = _rooms[index];
+                    final roomName = room['name'] as String? ?? 'Live Room';
+                    final hostName = room['hostName'] as String? ?? 'Host';
+                    final femaleSpeaker = room['femaleSpeaker'] as String?;
+                    final otherSpeaker = room['otherSpeaker'] as String?;
+                    final currentName = user?['name']?.toString() ?? '';
+                    final isOwnPartnerSeat = femaleSpeaker == currentName;
+                    final canJoinPartner = femaleSpeaker == null;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 14),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B1A3D),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(roomName, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 6),
+                          Text('Host: $hostName', style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                          const SizedBox(height: 8),
+                          Text('Partner seat: ${femaleSpeaker ?? 'Open'}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text('Speaker seat: ${otherSpeaker ?? 'Open'}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: isOwnPartnerSeat || !canJoinPartner
+                                      ? null
+                                      : () => _joinPartnerSeat(room['_id']?.toString() ?? room['id'].toString()),
+                                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF5AA2), padding: const EdgeInsets.symmetric(vertical: 14)),
+                                  child: Text(isOwnPartnerSeat ? 'You are partner' : (canJoinPartner ? 'Join as Partner' : 'Partner taken')),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (context) => RoomDetailScreen(room: room)),
+                                    );
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: Color(0xFFFF5AA2)),
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                  ),
+                                  child: const Text('View', style: TextStyle(color: Color(0xFFFF5AA2))),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
           ],
         ),
       ),

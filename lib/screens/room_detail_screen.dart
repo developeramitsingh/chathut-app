@@ -26,9 +26,45 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     return currentUser != null && currentUser['name'] == _room['hostName'];
   }
 
+  bool get _isFemaleSpeaker {
+    final currentUser = ApiService.currentUser;
+    return currentUser != null && currentUser['name'] == _room['femaleSpeaker'];
+  }
+
+  bool get _isNormalSpeaker {
+    final currentUser = ApiService.currentUser;
+    return currentUser != null && currentUser['name'] == _room['otherSpeaker'];
+  }
+
+  bool get _isQueued {
+    final currentUser = ApiService.currentUser;
+    if (currentUser == null || _room['queue'] == null) return false;
+    final queue = List<dynamic>.from(_room['queue'] as List<dynamic>);
+    final currentId = currentUser['_id']?.toString() ?? currentUser['id']?.toString();
+    return queue.any((entry) {
+      final map = entry as Map<String, dynamic>;
+      return map['userId']?.toString() == currentId || map['userName'] == currentUser['name'];
+    });
+  }
+
+  int get _queuePosition {
+    final currentUser = ApiService.currentUser;
+    if (currentUser == null || _room['queue'] == null) return -1;
+    final queue = List<dynamic>.from(_room['queue'] as List<dynamic>);
+    final currentId = currentUser['_id']?.toString() ?? currentUser['id']?.toString();
+    for (var i = 0; i < queue.length; i++) {
+      final map = queue[i] as Map<String, dynamic>;
+      if (map['userId']?.toString() == currentId || map['userName'] == currentUser['name']) {
+        return i + 1;
+      }
+    }
+    return -1;
+  }
+
   bool get _hasFemaleSpeaker => _room['femaleSpeaker'] != null;
-  bool get _hasCoSpeaker => _room['otherSpeaker'] != null;
-  String get _currentGender => ApiService.currentUser?['gender'] ?? '';
+  bool get _hasNormalSpeaker => _room['otherSpeaker'] != null;
+  bool get _isPartner => ApiService.currentUser?['role'] == 'partner';
+  bool get _isNormalUser => ApiService.currentUser?['role'] == 'user';
 
   Future<void> _refreshRoom() async {
     if (_room['_id'] == null && _room['id'] == null) return;
@@ -59,7 +95,41 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       await ApiService.joinRoom(roomId: roomId, role: role);
       await _refreshRoom();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Joined room successfully')));
+        final message = role == 'coSpeaker' || role == 'normalSpeaker'
+            ? (_hasNormalSpeaker ? 'Queued for the speaker seat' : 'Joined as normal speaker')
+            : role == 'femaleSpeaker'
+                ? 'Joined as female speaker'
+                : 'Joined room successfully';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _message = e.toString();
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _leaveRoom() async {
+    if (_room['_id'] == null && _room['id'] == null) return;
+    final roomId = _room['_id']?.toString() ?? _room['id'].toString();
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
+
+    try {
+      await ApiService.leaveRoom(roomId: roomId);
+      await _refreshRoom();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Left room successfully')));
       }
     } catch (e) {
       if (mounted) {
@@ -151,26 +221,49 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               const Center(child: CircularProgressIndicator())
             else ...[
               ElevatedButton(
-                onPressed: _isHost ? null : () => _joinRoom('listener'),
+                onPressed: _isHost || _isFemaleSpeaker || _isNormalSpeaker ? null : () => _joinRoom('listener'),
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5E4FFF), padding: const EdgeInsets.symmetric(vertical: 16)),
                 child: const Text('Join as Listener'),
               ),
               const SizedBox(height: 12),
-              if (!_hasFemaleSpeaker && _currentGender == 'female' && !_isHost)
+              if (_isFemaleSpeaker)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text('You are the partner speaker in this room.', style: TextStyle(color: Colors.white70)),
+              )
+            else if (!_hasFemaleSpeaker && _isPartner && !_isHost)
                 ElevatedButton(
                   onPressed: () => _joinRoom('femaleSpeaker'),
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF5AA2), padding: const EdgeInsets.symmetric(vertical: 16)),
-                  child: const Text('Take Female Speaker Role'),
+                  child: const Text('Join as Partner Speaker'),
                 ),
-              if (!_hasFemaleSpeaker && _currentGender != 'female' && !_isHost)
-                const Text('Only female users can take the female speaker role.', style: TextStyle(color: Colors.white54)),
-              if (!_hasCoSpeaker && !_isHost)
+              if (!_hasFemaleSpeaker && !_isPartner && !_isHost)
+                const Text('Only partner female users can take the female speaker role.', style: TextStyle(color: Colors.white54)),
+              const SizedBox(height: 12),
+              if (!_hasNormalSpeaker && _isNormalUser && !_isHost)
+                ElevatedButton(
+                  onPressed: () => _joinRoom('coSpeaker'),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8E44AD), padding: const EdgeInsets.symmetric(vertical: 16)),
+                  child: const Text('Take Speaker Seat'),
+                ),
+              if (_hasNormalSpeaker && _isNormalUser && !_isNormalSpeaker && !_isQueued)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: ElevatedButton(
                     onPressed: () => _joinRoom('coSpeaker'),
                     style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8E44AD), padding: const EdgeInsets.symmetric(vertical: 16)),
-                    child: const Text('Take Co-speaker Role'),
+                    child: const Text('Queue for Speaker Seat'),
+                  ),
+                ),
+              if (_isQueued)
+                Text('You are queued for the speaker seat at position $_queuePosition.', style: const TextStyle(color: Colors.white70)),
+              if (_isFemaleSpeaker || _isNormalSpeaker || _isQueued)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: ElevatedButton(
+                    onPressed: _leaveRoom,
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB03060), padding: const EdgeInsets.symmetric(vertical: 16)),
+                    child: const Text('Leave Room / Leave Queue'),
                   ),
                 ),
             ],

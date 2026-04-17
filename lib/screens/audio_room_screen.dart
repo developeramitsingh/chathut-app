@@ -124,11 +124,11 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
             ],
           ),
         ),
-        Expanded(
-          child: ListView.builder(
+        if (widget.nested)
+          ListView.builder(
             padding: const EdgeInsets.all(16),
-            shrinkWrap: widget.nested,
-            physics: widget.nested ? const NeverScrollableScrollPhysics() : null,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
             itemCount: _rooms.length,
             itemBuilder: (context, index) {
               final room = _rooms[index];
@@ -196,8 +196,80 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
                 ),
               );
             },
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _rooms.length,
+              itemBuilder: (context, index) {
+                final room = _rooms[index];
+                return GestureDetector(
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => RoomDetailScreen(room: room)),
+                    );
+                    await _loadRooms();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF251B52), Color(0xFF321D61)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const CircleAvatar(
+                              radius: 22,
+                              backgroundColor: Color(0xFFFF4F8A),
+                              child: Icon(Icons.mic, color: Colors.white),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(room['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                                  const SizedBox(height: 4),
+                                  Text('Host ${room['hostName']}', style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF5AA2),
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Text('${room['listeners']} listening', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        Row(
+                          children: [
+                            _RoleChip(label: 'Female', value: room['femaleSpeaker'] as String?),
+                            const SizedBox(width: 12),
+                            _RoleChip(label: 'Co-speaker', value: room['otherSpeaker'] as String?),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
-        ),
       ],
     );
   }

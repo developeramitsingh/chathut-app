@@ -148,6 +148,16 @@ class ApiService {
     return body;
   }
 
+  static Future<Map<String, dynamic>> leaveRoom({required String roomId}) async {
+    final uri = Uri.parse('$baseUrl/rooms/$roomId/leave');
+    final response = await http.post(uri, headers: headers);
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200) {
+      throw Exception(body['message'] ?? 'Unable to leave room (status ${response.statusCode})');
+    }
+    return body;
+  }
+
   static void logout() {
     token = null;
     currentUser = null;
