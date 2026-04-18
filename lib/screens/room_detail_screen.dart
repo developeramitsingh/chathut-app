@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/socket_service.dart';
+import 'call_screen.dart';
 
 class RoomDetailScreen extends StatefulWidget {
   final Map<String, dynamic> room;
@@ -13,27 +17,34 @@ class RoomDetailScreen extends StatefulWidget {
 class _RoomDetailScreenState extends State<RoomDetailScreen> {
   late Map<String, dynamic> _room;
   bool _isLoading = false;
+  bool _isConnectingAudio = false;
+  bool _callInProgress = false;
   String? _message;
+  StreamSubscription<Map<String, dynamic>>? _roomUpdateSubscription;
+  StreamSubscription<Map<String, dynamic>>? _incomingCallSubscription;
 
   @override
   void initState() {
     super.initState();
     _room = widget.room;
+    _subscribeToRoom();
   }
 
-  bool get _isHost {
-    final currentUser = ApiService.currentUser;
-    return currentUser != null && currentUser['name'] == _room['hostName'];
-  }
+  Map<String, dynamic>? get _currentUser => ApiService.currentUser;
+  String? get _currentUserId => _currentUser?['_id']?.toString() ?? _currentUser?['id']?.toString();
 
-  bool get _isFemaleSpeaker {
-    final currentUser = ApiService.currentUser;
-    return currentUser != null && currentUser['name'] == _room['femaleSpeaker'];
-  }
+  bool get _isHost => _currentUserId != null && _currentUserId == _room['hostId']?.toString();
 
-  bool get _isNormalSpeaker {
-    final currentUser = ApiService.currentUser;
-    return currentUser != null && currentUser['name'] == _room['otherSpeaker'];
+  bool get _isFemaleSpeaker => _currentUserId != null && _currentUserId == _room['femaleSpeakerId']?.toString();
+
+  bool get _isNormalSpeaker => _currentUserId != null && _currentUserId == _room['otherSpeakerId']?.toString();
+
+  bool get _isRoomParticipant => _isHost || _isFemaleSpeaker || _isNormalSpeaker;
+
+  bool _isInRoom(String userId) {
+    return userId == _room['hostId']?.toString() ||
+        userId == _room['femaleSpeakerId']?.toString() ||
+        userId == _room['otherSpeakerId']?.toString();
   }
 
   bool get _isQueued {
@@ -66,6 +77,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   bool get _isPartner => ApiService.currentUser?['role'] == 'partner';
   bool get _isNormalUser => ApiService.currentUser?['role'] == 'user';
 
+  bool get _canCallPartner => _isHost && _room['femaleSpeakerId'] != null;
+  bool get _canCallHost => _isFemaleSpeaker && _room['hostId'] != null;
+  bool get _canCallCoSpeaker => _isHost && _room['otherSpeakerId'] != null;
+
   Future<void> _refreshRoom() async {
     if (_room['_id'] == null && _room['id'] == null) return;
     final roomId = _room['_id']?.toString() ?? _room['id'].toString();
@@ -75,6 +90,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       setState(() {
         _room = updated;
       });
+      _attemptAutoConnect();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -147,12 +163,149 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   }
 
   @override
+  void dispose() {
+    _roomUpdateSubscription?.cancel();
+    _incomingCallSubscription?.cancel();
+    if (_room['_id'] != null || _room['id'] != null) {
+      final roomId = _room['_id']?.toString() ?? _room['id'].toString();
+      SocketService.instance.unsubscribeRoom(roomId);
+    }
+    super.dispose();
+  }
+
+  void _subscribeToRoom() {
+    final roomId = _room['_id']?.toString() ?? _room['id']?.toString();
+    if (roomId == null || roomId.isEmpty) return;
+    SocketService.instance.subscribeRoom(roomId);
+    _roomUpdateSubscription = SocketService.instance.roomUpdateStream.listen(_handleRoomUpdated);
+    _incomingCallSubscription = SocketService.instance.incomingCallStream.listen(_handleIncomingCall);
+  }
+
+  void _handleRoomUpdated(Map<String, dynamic> event) {
+    final roomId = _room['_id']?.toString() ?? _room['id']?.toString();
+    final updatedId = event['_id']?.toString() ?? event['id']?.toString();
+    if (roomId != updatedId) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _room = event;
+    });
+    _attemptAutoConnect();
+  }
+
+  void _handleIncomingCall(Map<String, dynamic> event) {
+    final callerId = event['callerId']?.toString();
+    final callerName = event['callerName']?.toString() ?? 'Caller';
+    if (callerId == null || _callInProgress) {
+      return;
+    }
+    if (!_isInRoom(callerId)) {
+      return;
+    }
+    if (!_isRoomParticipant) {
+      return;
+    }
+    _acceptIncomingRoomCall(callerId, callerName);
+  }
+
+  Future<void> _acceptIncomingRoomCall(String callerId, String callerName) async {
+    if (_callInProgress) return;
+    setState(() {
+      _callInProgress = true;
+    });
+    SocketService.instance.acceptCall(callerId);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CallScreen(
+          partnerId: callerId,
+          partnerName: callerName,
+          isCaller: false,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      _callInProgress = false;
+    });
+  }
+
+  void _attemptAutoConnect() {
+    if (_callInProgress) return;
+    if (!_isRoomParticipant) return;
+
+    if (_isHost) {
+      final femaleSpeakerId = _room['femaleSpeakerId']?.toString();
+      if (femaleSpeakerId != null && femaleSpeakerId.isNotEmpty) {
+        _startRoomAudioCall(
+          targetId: femaleSpeakerId,
+          targetName: _room['femaleSpeaker'] as String? ?? 'Partner',
+        );
+        return;
+      }
+      final otherSpeakerId = _room['otherSpeakerId']?.toString();
+      if (otherSpeakerId != null && otherSpeakerId.isNotEmpty) {
+        _startRoomAudioCall(
+          targetId: otherSpeakerId,
+          targetName: _room['otherSpeaker'] as String? ?? 'Co-speaker',
+        );
+      }
+      return;
+    }
+
+    final hostId = _room['hostId']?.toString();
+    if (hostId != null && hostId.isNotEmpty) {
+      _startRoomAudioCall(
+        targetId: hostId,
+        targetName: _room['hostName'] as String? ?? 'Host',
+      );
+    }
+  }
+
+  Future<void> _startRoomAudioCall({
+    required String targetId,
+    required String targetName,
+  }) async {
+    if (_callInProgress || !_isRoomParticipant) return;
+    if (!SocketService.instance.isConnected) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not connected to live service.')));
+      return;
+    }
+
+    setState(() {
+      _callInProgress = true;
+      _isConnectingAudio = true;
+    });
+
+    SocketService.instance.callPartner(targetId);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CallScreen(
+          partnerId: targetId,
+          partnerName: targetName,
+          isCaller: true,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _callInProgress = false;
+      _isConnectingAudio = false;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final hostName = _room['hostName'] as String? ?? 'Host';
     final roomName = _room['name'] as String? ?? 'Live Room';
     final femaleSpeaker = _room['femaleSpeaker'] as String?;
     final otherSpeaker = _room['otherSpeaker'] as String?;
     final listeners = _room['listeners']?.toString() ?? '0';
+    final queue = List<Map<String, dynamic>>.from(_room['queue'] as List<dynamic>? ?? []);
 
     return Scaffold(
       appBar: AppBar(
@@ -213,6 +366,50 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
             const SizedBox(height: 10),
             _RoleCard(title: 'Co-speaker', value: otherSpeaker ?? 'Open', icon: Icons.mic),
             const SizedBox(height: 16),
+            Text('Room participants', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _ParticipantTile(label: 'Host', value: hostName, isActive: _isHost, icon: Icons.person),
+                _ParticipantTile(label: 'Partner', value: femaleSpeaker ?? 'Open', isActive: _isFemaleSpeaker, icon: Icons.female),
+                _ParticipantTile(label: 'Co-speaker', value: otherSpeaker ?? 'Open', isActive: _isNormalSpeaker, icon: Icons.mic),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text('Waiting list', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            if (queue.isEmpty)
+              const Text('No users waiting to join yet.', style: TextStyle(color: Colors.white54))
+            else
+              Column(
+                children: queue.map((entry) {
+                  final name = entry['userName']?.toString() ?? 'Waiting user';
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF3A2F6E),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : '?',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(child: Text(name, style: const TextStyle(color: Colors.white70))),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            const SizedBox(height: 16),
             if (_message != null) ...[
               Text(_message!, style: const TextStyle(color: Colors.redAccent)),
               const SizedBox(height: 12),
@@ -236,6 +433,42 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                   onPressed: () => _joinRoom('femaleSpeaker'),
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF5AA2), padding: const EdgeInsets.symmetric(vertical: 16)),
                   child: const Text('Join as Partner Speaker'),
+                ),
+              if (_canCallPartner)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: ElevatedButton(
+                    onPressed: _isConnectingAudio ? null : () => _startRoomAudioCall(
+                      targetId: _room['femaleSpeakerId']?.toString() ?? '',
+                      targetName: _room['femaleSpeaker'] as String? ?? 'Partner',
+                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3AA047), padding: const EdgeInsets.symmetric(vertical: 16)),
+                    child: Text(_isConnectingAudio ? 'Connecting audio...' : 'Start audio with partner'),
+                  ),
+                ),
+              if (_canCallHost)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: ElevatedButton(
+                    onPressed: _isConnectingAudio ? null : () => _startRoomAudioCall(
+                      targetId: _room['hostId']?.toString() ?? '',
+                      targetName: _room['hostName'] as String? ?? 'Host',
+                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3AA047), padding: const EdgeInsets.symmetric(vertical: 16)),
+                    child: Text(_isConnectingAudio ? 'Connecting audio...' : 'Call host for room audio'),
+                  ),
+                ),
+              if (_canCallCoSpeaker)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: ElevatedButton(
+                    onPressed: _isConnectingAudio ? null : () => _startRoomAudioCall(
+                      targetId: _room['otherSpeakerId']?.toString() ?? '',
+                      targetName: _room['otherSpeaker'] as String? ?? 'Co-speaker',
+                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3AA047), padding: const EdgeInsets.symmetric(vertical: 16)),
+                    child: Text(_isConnectingAudio ? 'Connecting audio...' : 'Call co-speaker'),
+                  ),
                 ),
               if (!_hasFemaleSpeaker && !_isPartner && !_isHost)
                 const Text('Only partner female users can take the female speaker role.', style: TextStyle(color: Colors.white54)),
@@ -337,6 +570,45 @@ class _RoleCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ParticipantTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool isActive;
+  final IconData icon;
+
+  const _ParticipantTile({required this.label, required this.value, required this.isActive, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFF2E5A34) : const Color(0xFF151A3C),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: isActive ? const Color(0xFF3AA047) : const Color(0xFF2A2F57)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: Colors.white70, size: 18),
+                const SizedBox(width: 8),
+                Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 4),
+            Text(isActive ? 'You are here' : 'Status', style: const TextStyle(color: Color.fromRGBO(255, 255, 255, 0.65), fontSize: 11)),
+          ],
+        ),
       ),
     );
   }

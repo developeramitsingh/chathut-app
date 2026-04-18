@@ -18,6 +18,7 @@ class SocketService {
   final _offerController = StreamController<Map<String, dynamic>>.broadcast();
   final _answerController = StreamController<Map<String, dynamic>>.broadcast();
   final _candidateController = StreamController<Map<String, dynamic>>.broadcast();
+  final _roomUpdateController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<List<Map<String, dynamic>>> get liveUsersStream => _liveUsersController.stream;
   Stream<Map<String, dynamic>> get incomingCallStream => _incomingCallController.stream;
@@ -27,12 +28,14 @@ class SocketService {
   Stream<Map<String, dynamic>> get offerStream => _offerController.stream;
   Stream<Map<String, dynamic>> get answerStream => _answerController.stream;
   Stream<Map<String, dynamic>> get candidateStream => _candidateController.stream;
+  Stream<Map<String, dynamic>> get roomUpdateStream => _roomUpdateController.stream;
 
   bool get isConnected => _socket?.connected == true;
 
   Map<String, dynamic>? _cachedCallAccepted;
   final Map<String, Map<String, dynamic>> _cachedOffers = {};
   final Map<String, Map<String, dynamic>> _cachedAnswers = {};
+  String? _subscribedRoomId;
 
   Map<String, dynamic>? getLastCallAccepted(String partnerId) {
     if (_cachedCallAccepted != null && _cachedCallAccepted!['partnerId'] == partnerId) {
@@ -73,6 +76,9 @@ class SocketService {
 
     _socket!.on('connect', (_) {
       requestLiveUsers();
+      if (_subscribedRoomId != null) {
+        _socket!.emit('subscribeRoom', {'roomId': _subscribedRoomId});
+      }
     });
 
     _socket!.on('liveUsers', (data) {
@@ -128,6 +134,14 @@ class SocketService {
       }
     });
 
+    _socket!.on('roomUpdated', (data) {
+      if (data is Map) {
+        final event = Map<String, dynamic>.from(data.cast<String, dynamic>());
+        print('[SocketService] roomUpdated: $event');
+        _roomUpdateController.add(event);
+      }
+    });
+
     _socket!.on('callEnded', (_) {
       _callEndedController.add(null);
     });
@@ -149,8 +163,28 @@ class SocketService {
   }
 
   void disconnect() {
+    if (_subscribedRoomId != null) {
+      unsubscribeRoom(_subscribedRoomId!);
+    }
     _socket?.disconnect();
     _socket = null;
+    _subscribedRoomId = null;
+  }
+
+  void subscribeRoom(String roomId) {
+    _subscribedRoomId = roomId;
+    if (isConnected) {
+      _socket!.emit('subscribeRoom', {'roomId': roomId});
+    }
+  }
+
+  void unsubscribeRoom(String roomId) {
+    if (isConnected) {
+      _socket!.emit('unsubscribeRoom', {'roomId': roomId});
+    }
+    if (_subscribedRoomId == roomId) {
+      _subscribedRoomId = null;
+    }
   }
 
   void requestLiveUsers() {
@@ -217,6 +251,10 @@ class SocketService {
     _callAcceptedController.close();
     _callEndedController.close();
     _callFailedController.close();
+    _offerController.close();
+    _answerController.close();
+    _candidateController.close();
+    _roomUpdateController.close();
     disconnect();
   }
 }
