@@ -66,7 +66,10 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     _callAcceptedSubscription = SocketService.instance.callAcceptedStream.listen((data) {
+      // Only open CallScreen if HomeScreen is the active route (not when inside a room)
       if (_isCallingPartner || !mounted) return;
+      final route = ModalRoute.of(context);
+      if (route == null || !route.isCurrent) return;
       _isCallingPartner = true;
       Navigator.push(
         context,
@@ -298,7 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 16),
                   SizedBox(
-                    height: 110,
+                    height: 140,
                     child: _isLoadingLiveUsers
                         ? const Center(child: CircularProgressIndicator())
                         : _liveUsersError != null
@@ -421,8 +424,8 @@ class _FriendCard extends StatelessWidget {
               child: Text(name[0], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
             ),
           ),
-          const Spacer(),
-          Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 8),
+          Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis, maxLines: 1),
           const SizedBox(height: 6),
           Row(
             children: [

@@ -142,7 +142,7 @@ class ApiService {
     final uri = Uri.parse('$baseUrl/rooms/$roomId/join');
     final response = await http.post(uri, headers: headers, body: jsonEncode({'role': role}));
     final body = _decodeJson(response.body);
-    if (response.statusCode != 200) {
+    if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception(body['message'] ?? 'Unable to join room (status ${response.statusCode})');
     }
     return body;
@@ -152,7 +152,7 @@ class ApiService {
     final uri = Uri.parse('$baseUrl/rooms/$roomId/leave');
     final response = await http.post(uri, headers: headers);
     final body = _decodeJson(response.body);
-    if (response.statusCode != 200) {
+    if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception(body['message'] ?? 'Unable to leave room (status ${response.statusCode})');
     }
     return body;
