@@ -50,6 +50,7 @@ class _CallScreenState extends State<CallScreen> {
   int _earnedCoins = 0;
   bool _showEarnedStats = false;
   bool _isPopupVisible = false;
+  bool _isExitingCall = false;
   Timer? _callTimer;
   final List<RTCIceCandidate> _pendingCandidates = [];
 
@@ -88,6 +89,21 @@ class _CallScreenState extends State<CallScreen> {
     _isPopupVisible = false;
   }
 
+  Future<void> _exitCallScreenOnce() async {
+    if (!mounted || _isExitingCall) return;
+    _isExitingCall = true;
+
+    if (_isPopupVisible) {
+      Navigator.of(context, rootNavigator: true).maybePop();
+      _isPopupVisible = false;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+
+    if (mounted) {
+      Navigator.of(context).maybePop();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -101,14 +117,7 @@ class _CallScreenState extends State<CallScreen> {
     _showEarnedStats = role == 'partner' && gender == 'female';
 
     _callEndedSub = SocketService.instance.callEndedStream.listen((_) {
-      if (!mounted) return;
-      if (_isPopupVisible) {
-        Navigator.of(context, rootNavigator: true).pop();
-        _isPopupVisible = false;
-      }
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
+      _exitCallScreenOnce();
     });
 
     _callFailedSub = SocketService.instance.callFailedStream.listen((
@@ -116,7 +125,7 @@ class _CallScreenState extends State<CallScreen> {
     ) async {
       if (!mounted) return;
       await _showPopup(title: 'Call Alert', message: reason);
-      if (mounted) Navigator.of(context).pop();
+      await _exitCallScreenOnce();
     });
 
     _callAcceptedSub = SocketService.instance.callAcceptedStream.listen((
@@ -500,7 +509,7 @@ class _CallScreenState extends State<CallScreen> {
 
   void _endCall() {
     SocketService.instance.endCall(widget.partnerId);
-    if (mounted) Navigator.of(context).pop();
+    _exitCallScreenOnce();
   }
 
   @override
