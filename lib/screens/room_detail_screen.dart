@@ -42,6 +42,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   bool _isCaller = false;
   bool _offerSent = false;
   bool _remoteDescSet = false;
+  bool _remoteAnswerSet = false;
   String? _connectedPartnerId;
   final List<RTCIceCandidate> _pendingCandidates = [];
   Timer? _autoConnectRetryTimer;
@@ -87,8 +88,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   String? get _myId => _me?['_id']?.toString() ?? _me?['id']?.toString();
 
   bool get _isHost => _myId != null && _myId == _room['hostId']?.toString();
-  bool get _isFemaleSpeaker => _myId != null && _myId == _room['femaleSpeakerId']?.toString();
-  bool get _isNormalSpeaker => _myId != null && _myId == _room['otherSpeakerId']?.toString();
+  bool get _isFemaleSpeaker =>
+      _myId != null && _myId == _room['femaleSpeakerId']?.toString();
+  bool get _isNormalSpeaker =>
+      _myId != null && _myId == _room['otherSpeakerId']?.toString();
   bool get _isSpeaker => _isHost || _isFemaleSpeaker || _isNormalSpeaker;
 
   bool get _hasFemaleSpeaker {
@@ -118,7 +121,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     final q = List<dynamic>.from(_room['queue'] as List);
     for (var i = 0; i < q.length; i++) {
       final m = q[i] as Map<String, dynamic>;
-      if (m['userId']?.toString() == _myId || m['userName'] == _me!['name']) return i + 1;
+      if (m['userId']?.toString() == _myId || m['userName'] == _me!['name'])
+        return i + 1;
     }
     return -1;
   }
@@ -129,13 +133,21 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     final id = _roomId;
     if (id == null || id.isEmpty) return;
     SocketService.instance.subscribeRoom(id);
-    _roomUpdateSub = SocketService.instance.roomUpdateStream.listen(_onRoomUpdated);
-    _incomingCallSub = SocketService.instance.incomingCallStream.listen(_onIncomingCall);
-    _callAcceptedSub = SocketService.instance.callAcceptedStream.listen(_onCallAccepted);
+    _roomUpdateSub = SocketService.instance.roomUpdateStream.listen(
+      _onRoomUpdated,
+    );
+    _incomingCallSub = SocketService.instance.incomingCallStream.listen(
+      _onIncomingCall,
+    );
+    _callAcceptedSub = SocketService.instance.callAcceptedStream.listen(
+      _onCallAccepted,
+    );
     _offerSub = SocketService.instance.offerStream.listen(_onOffer);
     _answerSub = SocketService.instance.answerStream.listen(_onAnswer);
     _candidateSub = SocketService.instance.candidateStream.listen(_onCandidate);
-    _callEndedSub = SocketService.instance.callEndedStream.listen((_) => _onCallEnded());
+    _callEndedSub = SocketService.instance.callEndedStream.listen(
+      (_) => _onCallEnded(),
+    );
   }
 
   // ── Room data ─────────────────────────────────────────────────────────────
@@ -198,7 +210,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     _seatTimer?.cancel();
     if (mounted) setState(() => _seatSecondsLeft = _kSeatSeconds);
     _seatTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() => _seatSecondsLeft--);
       if (_seatSecondsLeft <= 0) {
         t.cancel();
@@ -208,7 +223,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   }
 
   Future<void> _rotateSeat() async {
-    if (_connectedPartnerId != null) SocketService.instance.endCall(_connectedPartnerId!);
+    if (_connectedPartnerId != null)
+      SocketService.instance.endCall(_connectedPartnerId!);
     await _leaveRoom();
   }
 
@@ -217,7 +233,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   Future<void> _joinRoom(String role) async {
     final id = _roomId;
     if (id == null) return;
-    setState(() { _isLoading = true; _message = null; });
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
     try {
       await ApiService.joinRoom(roomId: id, role: role);
       await _refreshRoom();
@@ -225,9 +244,11 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         final msg = role == 'femaleSpeaker'
             ? 'Joined as partner speaker'
             : role == 'coSpeaker' || role == 'normalSpeaker'
-                ? (_hasNormalSpeaker ? 'Added to queue' : 'Joined as co-speaker')
-                : 'Joined as listener';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+            ? (_hasNormalSpeaker ? 'Added to queue' : 'Joined as co-speaker')
+            : 'Joined as listener';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
       }
     } catch (e) {
       if (mounted) setState(() => _message = e.toString());
@@ -239,13 +260,18 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   Future<void> _leaveRoom() async {
     final id = _roomId;
     if (id == null) return;
-    setState(() { _isLoading = true; _message = null; });
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
     _teardownAudio(notify: true);
     try {
       await ApiService.leaveRoom(roomId: id);
       await _refreshRoom();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Left room')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Left room')));
       }
     } catch (e) {
       if (mounted) setState(() => _message = e.toString());
@@ -264,7 +290,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       if (!SocketService.instance.isConnected) {
         // Socket not ready yet – retry in 2 seconds
         _autoConnectRetryTimer?.cancel();
-        _autoConnectRetryTimer = Timer(const Duration(seconds: 2), _attemptAutoConnect);
+        _autoConnectRetryTimer = Timer(
+          const Duration(seconds: 2),
+          _attemptAutoConnect,
+        );
         return;
       }
       _initiateCall(
@@ -274,7 +303,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     }
   }
 
-  Future<void> _initiateCall({required String targetId, required String targetName}) async {
+  Future<void> _initiateCall({
+    required String targetId,
+    required String targetName,
+  }) async {
     if (_audioConnected || _audioConnecting) return;
     if (!SocketService.instance.isConnected) {
       if (mounted) {
@@ -286,16 +318,24 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     }
     print('[LiveRoom] initiating call → $targetId');
     if (!mounted) return;
-    setState(() { _audioConnecting = true; _isCaller = true; _connectedPartnerId = targetId; });
+    setState(() {
+      _audioConnecting = true;
+      _isCaller = true;
+      _connectedPartnerId = targetId;
+    });
     try {
       await _setupPeerConnection();
     } catch (e) {
       print('[LiveRoom] _setupPeerConnection error: $e');
       if (mounted) {
-        setState(() { _audioConnecting = false; _isCaller = false; _connectedPartnerId = null; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Mic error: $e')),
-        );
+        setState(() {
+          _audioConnecting = false;
+          _isCaller = false;
+          _connectedPartnerId = null;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Mic error: $e')));
       }
       return;
     }
@@ -304,8 +344,17 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     // Drain cached callAccepted
     final cached = SocketService.instance.getLastCallAccepted(targetId);
     if (cached != null && !_offerSent) {
-      SocketService.instance.clearLastCallAccepted();
-      await _sendOffer();
+      final sent = await _sendOffer();
+      if (sent) {
+        SocketService.instance.clearLastCallAccepted();
+      }
+    }
+
+    // Drain cached answer that may arrive before listeners are fully ready
+    final cachedAnswer = SocketService.instance.getLastAnswer(targetId);
+    if (cachedAnswer != null && !_remoteAnswerSet) {
+      await _handleAnswer(cachedAnswer);
+      SocketService.instance.clearLastAnswer(targetId);
     }
   }
 
@@ -319,17 +368,24 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     if (!_isFemaleSpeaker) return;
     print('[LiveRoom] auto-accepting from $callerId ($callerName)');
     if (!mounted) return;
-    setState(() { _audioConnecting = true; _isCaller = false; _connectedPartnerId = callerId; });
+    setState(() {
+      _audioConnecting = true;
+      _isCaller = false;
+      _connectedPartnerId = callerId;
+    });
     SocketService.instance.acceptCall(callerId);
     try {
       await _setupPeerConnection();
     } catch (e) {
       print('[LiveRoom] _setupPeerConnection error on accept: $e');
       if (mounted) {
-        setState(() { _audioConnecting = false; _connectedPartnerId = null; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Mic error: $e')),
-        );
+        setState(() {
+          _audioConnecting = false;
+          _connectedPartnerId = null;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Mic error: $e')));
       }
       return;
     }
@@ -337,8 +393,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     // Drain cached offer
     final cached = SocketService.instance.getLastOffer(callerId);
     if (cached != null) {
-      SocketService.instance.clearLastOffer(callerId);
-      await _handleOffer(cached);
+      final handled = await _handleOffer(cached);
+      if (handled) {
+        SocketService.instance.clearLastOffer(callerId);
+      }
     }
   }
 
@@ -347,17 +405,21 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     final acceptedBy = event['partnerId']?.toString();
     if (acceptedBy != _connectedPartnerId) return;
     print('[LiveRoom] callAccepted by $acceptedBy');
-    SocketService.instance.clearLastCallAccepted();
     if (!mounted) return;
-    await _sendOffer();
+    final sent = await _sendOffer();
+    if (sent) {
+      SocketService.instance.clearLastCallAccepted();
+    }
   }
 
   void _onOffer(Map<String, dynamic> data) async {
     final fromId = data['from']?.toString();
     if (_isCaller || fromId != _connectedPartnerId) return;
     print('[LiveRoom] offer from $fromId');
-    await _handleOffer(data);
-    SocketService.instance.clearLastOffer(fromId ?? '');
+    final handled = await _handleOffer(data);
+    if (handled && fromId != null) {
+      SocketService.instance.clearLastOffer(fromId);
+    }
   }
 
   void _onAnswer(Map<String, dynamic> data) async {
@@ -366,6 +428,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   }
 
   void _onCandidate(Map<String, dynamic> data) async {
+    final fromId = data['from']?.toString();
+    if (fromId != null && fromId != _connectedPartnerId) return;
     await _handleCandidate(data);
   }
 
@@ -387,7 +451,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     };
     // getUserMedia may throw if permission is denied or no mic is available.
     try {
-      _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+      _localStream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': false,
+      });
     } catch (e) {
       throw Exception('Microphone access denied or unavailable: $e');
     }
@@ -396,7 +463,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       await _pc!.addTrack(track, _localStream!);
     }
     _pc!.onIceCandidate = (c) {
-      if (c.candidate == null || c.candidate!.isEmpty || _connectedPartnerId == null) return;
+      if (c.candidate == null ||
+          c.candidate!.isEmpty ||
+          _connectedPartnerId == null)
+        return;
       print('[LiveRoom] ICE candidate → $_connectedPartnerId: ${c.candidate}');
       SocketService.instance.sendCandidate(_connectedPartnerId!, {
         'candidate': c.candidate,
@@ -405,22 +475,33 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       });
     };
     _pc!.onTrack = (event) {
-      print('[LiveRoom] onTrack: ${event.track.kind}, streams=${event.streams.length}');
+      print(
+        '[LiveRoom] onTrack: ${event.track.kind}, streams=${event.streams.length}',
+      );
       final stream = event.streams.isNotEmpty ? event.streams[0] : null;
       if (stream != null) {
         _remoteRenderer.srcObject = stream;
         _remoteRenderer.muted = false;
-        if (mounted) setState(() { _audioConnected = true; _audioConnecting = false; });
+        if (mounted)
+          setState(() {
+            _audioConnected = true;
+            _audioConnecting = false;
+          });
       } else {
         // Fallback: no stream in event but track arrived – mark connected when ICE completes
-        print('[LiveRoom] onTrack: no streams in event, will rely on ICE state');
+        print(
+          '[LiveRoom] onTrack: no streams in event, will rely on ICE state',
+        );
       }
     };
     _pc!.onConnectionState = (state) {
       print('[LiveRoom] connectionState: $state');
       if (!mounted) return;
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-        setState(() { _audioConnected = true; _audioConnecting = false; });
+        setState(() {
+          _audioConnected = true;
+          _audioConnecting = false;
+        });
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
         _teardownAudio(notify: false);
@@ -431,44 +512,69 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       if (!mounted) return;
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
-        setState(() { _audioConnected = true; _audioConnecting = false; });
+        setState(() {
+          _audioConnected = true;
+          _audioConnecting = false;
+        });
       }
     };
   }
 
-  Future<void> _sendOffer() async {
-    if (_offerSent || _pc == null) return;
+  Future<bool> _sendOffer() async {
+    if (_offerSent || _pc == null || _connectedPartnerId == null) return false;
     _offerSent = true;
     final offer = await _pc!.createOffer({'offerToReceiveAudio': true});
     await _pc!.setLocalDescription(offer);
     SocketService.instance.sendOffer(_connectedPartnerId!, offer.toMap());
+    return true;
   }
 
-  Future<void> _handleOffer(Map<String, dynamic> data) async {
-    if (_pc == null) return;
+  Future<bool> _handleOffer(Map<String, dynamic> data) async {
+    if (_pc == null) return false;
     final offerMap = data['offer'] as Map<String, dynamic>?;
-    if (offerMap == null) return;
+    if (offerMap == null) return false;
     await _pc!.setRemoteDescription(
-      RTCSessionDescription(offerMap['sdp'] as String, offerMap['type'] as String),
+      RTCSessionDescription(
+        offerMap['sdp'] as String,
+        offerMap['type'] as String,
+      ),
     );
     _remoteDescSet = true;
     await _flushPendingCandidates();
     final answer = await _pc!.createAnswer();
     await _pc!.setLocalDescription(answer);
-    SocketService.instance.sendAnswer(data['from']?.toString() ?? _connectedPartnerId!, answer.toMap());
-    if (mounted) setState(() { _audioConnected = true; _audioConnecting = false; });
+    SocketService.instance.sendAnswer(
+      data['from']?.toString() ?? _connectedPartnerId!,
+      answer.toMap(),
+    );
+    if (mounted)
+      setState(() {
+        _audioConnected = true;
+        _audioConnecting = false;
+      });
+    return true;
   }
 
   Future<void> _handleAnswer(Map<String, dynamic> data) async {
     if (_pc == null) return;
+    final fromId = data['from']?.toString();
+    if (fromId != null && fromId != _connectedPartnerId) return;
     final answerMap = data['answer'] as Map<String, dynamic>?;
     if (answerMap == null) return;
     await _pc!.setRemoteDescription(
-      RTCSessionDescription(answerMap['sdp'] as String, answerMap['type'] as String),
+      RTCSessionDescription(
+        answerMap['sdp'] as String,
+        answerMap['type'] as String,
+      ),
     );
+    _remoteAnswerSet = true;
     _remoteDescSet = true;
     await _flushPendingCandidates();
-    if (mounted) setState(() { _audioConnected = true; _audioConnecting = false; });
+    if (mounted)
+      setState(() {
+        _audioConnected = true;
+        _audioConnecting = false;
+      });
   }
 
   Future<void> _handleCandidate(Map<String, dynamic> data) async {
@@ -514,6 +620,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     _pc = null;
     _offerSent = false;
     _remoteDescSet = false;
+    _remoteAnswerSet = false;
     _pendingCandidates.clear();
     final prev = _connectedPartnerId;
     _connectedPartnerId = null;
@@ -521,7 +628,12 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       SocketService.instance.clearLastOffer(prev);
       SocketService.instance.clearLastCallAccepted();
     }
-    if (mounted) setState(() { _audioConnected = false; _audioConnecting = false; _isCaller = false; });
+    if (mounted)
+      setState(() {
+        _audioConnected = false;
+        _audioConnecting = false;
+        _isCaller = false;
+      });
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -532,13 +644,15 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     final hostName = _room['hostName'] as String? ?? 'Host';
     final femaleSpeakerName = _room['femaleSpeaker'] as String?;
     final otherSpeakerName = _room['otherSpeaker'] as String?;
-    final queue = List<Map<String, dynamic>>.from(_room['queue'] as List<dynamic>? ?? []);
+    final queue = List<Map<String, dynamic>>.from(
+      _room['queue'] as List<dynamic>? ?? [],
+    );
 
     final audioStatus = _audioConnected
         ? _AudioStatus.live
         : _audioConnecting
-            ? _AudioStatus.connecting
-            : _AudioStatus.idle;
+        ? _AudioStatus.connecting
+        : _AudioStatus.idle;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1030),
@@ -547,13 +661,26 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         title: Row(
           children: [
             Expanded(
-              child: Text(roomName,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              child: Text(
+                roomName,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
             if (_audioConnected)
-              _LiveBadge(label: 'LIVE', color: const Color(0xFF3AA047), icon: Icons.graphic_eq)
+              _LiveBadge(
+                label: 'LIVE',
+                color: const Color(0xFF3AA047),
+                icon: Icons.graphic_eq,
+              )
             else if (_audioConnecting)
-              _LiveBadge(label: 'Connecting…', color: const Color(0xFF9C4FFF), icon: Icons.hourglass_top),
+              _LiveBadge(
+                label: 'Connecting…',
+                color: const Color(0xFF9C4FFF),
+                icon: Icons.hourglass_top,
+              ),
           ],
         ),
       ),
@@ -561,7 +688,6 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-
             // ── HOST ──────────────────────────────────────────────────────
             _SpeakerTile(
               label: 'HOST',
@@ -586,7 +712,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                       isMe: _isFemaleSpeaker,
                       accent: const Color(0xFFFF5AA2),
                       icon: Icons.female,
-                      audioStatus: femaleSpeakerName != null ? audioStatus : null,
+                      audioStatus: femaleSpeakerName != null
+                          ? audioStatus
+                          : null,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -602,8 +730,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                           color: _audioConnected
                               ? const Color(0xFF3AA047)
                               : _audioConnecting
-                                  ? const Color(0xFF9C4FFF)
-                                  : Colors.white12,
+                              ? const Color(0xFF9C4FFF)
+                              : Colors.white12,
                           size: 24,
                         ),
                         const SizedBox(height: 4),
@@ -611,14 +739,14 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                           _audioConnected
                               ? 'audio\nlive'
                               : _audioConnecting
-                                  ? 'linking…'
-                                  : 'audio',
+                              ? 'linking…'
+                              : 'audio',
                           style: TextStyle(
                             color: _audioConnected
                                 ? const Color(0xFF3AA047)
                                 : _audioConnecting
-                                    ? const Color(0xFF9C4FFF)
-                                    : Colors.white12,
+                                ? const Color(0xFF9C4FFF)
+                                : Colors.white12,
                             fontSize: 9,
                           ),
                           textAlign: TextAlign.center,
@@ -635,7 +763,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                       isMe: _isNormalSpeaker,
                       accent: const Color(0xFF5E4FFF),
                       icon: Icons.mic,
-                      audioStatus: otherSpeakerName != null ? audioStatus : null,
+                      audioStatus: otherSpeakerName != null
+                          ? audioStatus
+                          : null,
                     ),
                   ),
                 ],
@@ -648,7 +778,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
             // ── CO-SPEAKER seat timer ──────────────────────────────────────
             if (_isNormalSpeaker) ...[
               const SizedBox(height: 16),
-              _SeatTimerBar(secondsLeft: _seatSecondsLeft, total: _kSeatSeconds),
+              _SeatTimerBar(
+                secondsLeft: _seatSecondsLeft,
+                total: _kSeatSeconds,
+              ),
             ],
 
             const SizedBox(height: 20),
@@ -658,7 +791,11 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               alignment: Alignment.centerLeft,
               child: Text(
                 'Waiting queue (${queue.length})',
-                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
             const SizedBox(height: 10),
@@ -670,7 +807,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Center(
-                  child: Text('No one waiting', style: TextStyle(color: Colors.white54)),
+                  child: Text(
+                    'No one waiting',
+                    style: TextStyle(color: Colors.white54),
+                  ),
                 ),
               )
             else
@@ -680,7 +820,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                 final name = e['userName']?.toString() ?? '?';
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF151A3C),
                     borderRadius: BorderRadius.circular(14),
@@ -689,7 +832,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                   child: Row(
                     children: [
                       Container(
-                        width: 32, height: 32,
+                        width: 32,
+                        height: 32,
                         decoration: BoxDecoration(
                           color: const Color(0xFF3A2F6E),
                           borderRadius: BorderRadius.circular(8),
@@ -697,12 +841,27 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                         alignment: Alignment.center,
                         child: Text(
                           '${idx + 1}',
-                          style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 13),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      Expanded(child: Text(name, style: const TextStyle(color: Colors.white))),
-                      Text('~${(idx + 1) * 5} min', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      Text(
+                        '~${(idx + 1) * 5} min',
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -725,7 +884,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
             const SizedBox(height: 12),
             TextButton(
               onPressed: _refreshRoom,
-              child: const Text('Refresh', style: TextStyle(color: Colors.white38)),
+              child: const Text(
+                'Refresh',
+                style: TextStyle(color: Colors.white38),
+              ),
             ),
           ],
         ),
@@ -750,7 +912,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
           ),
 
         // Partner speaker join
-        if (!_hasFemaleSpeaker && _isPartner && !_isHost && !_isFemaleSpeaker) ...[
+        if (!_hasFemaleSpeaker &&
+            _isPartner &&
+            !_isHost &&
+            !_isFemaleSpeaker) ...[
           const SizedBox(height: 10),
           ElevatedButton.icon(
             onPressed: () => _joinRoom('femaleSpeaker'),
@@ -769,7 +934,11 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
           ElevatedButton.icon(
             onPressed: () => _joinRoom('coSpeaker'),
             icon: Icon(_hasNormalSpeaker ? Icons.queue : Icons.mic),
-            label: Text(_hasNormalSpeaker ? 'Queue for Speaker Seat' : 'Take Speaker Seat'),
+            label: Text(
+              _hasNormalSpeaker
+                  ? 'Queue for Speaker Seat'
+                  : 'Take Speaker Seat',
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF8E44AD),
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -821,8 +990,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                     _audioConnected
                         ? 'Audio live with joiner'
                         : _audioConnecting
-                            ? 'Joiner is connecting…'
-                            : 'You are the partner — waiting for a joiner',
+                        ? 'Joiner is connecting…'
+                        : 'You are the partner — waiting for a joiner',
                     style: const TextStyle(color: Colors.white70),
                   ),
                 ),
@@ -857,19 +1026,33 @@ class _LiveBadge extends StatelessWidget {
   final String label;
   final Color color;
   final IconData icon;
-  const _LiveBadge({required this.label, required this.color, required this.icon});
+  const _LiveBadge({
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: Colors.white, size: 13),
           const SizedBox(width: 4),
-          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
@@ -901,7 +1084,10 @@ class _SpeakerTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: isMe ? const Color(0xFF1E2A50) : const Color(0xFF151A3C),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isMe ? accent : const Color(0xFF2A2F57), width: isMe ? 2 : 1),
+        border: Border.all(
+          color: isMe ? accent : const Color(0xFF2A2F57),
+          width: isMe ? 2 : 1,
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -911,28 +1097,54 @@ class _SpeakerTile extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 30,
-                backgroundColor: isEmpty ? const Color(0xFF2A2F57) : accent.withOpacity(0.25),
-                child: Icon(icon, color: isEmpty ? Colors.white24 : accent, size: 28),
+                backgroundColor: isEmpty
+                    ? const Color(0xFF2A2F57)
+                    : accent.withOpacity(0.25),
+                child: Icon(
+                  icon,
+                  color: isEmpty ? Colors.white24 : accent,
+                  size: 28,
+                ),
               ),
               if (audioStatus == _AudioStatus.live)
                 Container(
-                  width: 16, height: 16,
-                  decoration: const BoxDecoration(color: Color(0xFF3AA047), shape: BoxShape.circle),
-                  child: const Icon(Icons.graphic_eq, size: 10, color: Colors.white),
+                  width: 16,
+                  height: 16,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF3AA047),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.graphic_eq,
+                    size: 10,
+                    color: Colors.white,
+                  ),
                 )
               else if (audioStatus == _AudioStatus.connecting)
                 Container(
-                  width: 16, height: 16,
+                  width: 16,
+                  height: 16,
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: Color(0xFF9C4FFF), shape: BoxShape.circle),
-                  child: const CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF9C4FFF),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
                 ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             label,
-            style: TextStyle(color: accent, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+            style: TextStyle(
+              color: accent,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.2,
+            ),
           ),
           const SizedBox(height: 2),
           Text(
@@ -972,19 +1184,32 @@ class _SeatTimerBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: urgent ? const Color(0xFF3B1010) : const Color(0xFF151A3C),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: urgent ? Colors.redAccent : const Color(0xFF5E4FFF)),
+        border: Border.all(
+          color: urgent ? Colors.redAccent : const Color(0xFF5E4FFF),
+        ),
       ),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(children: [
-                Icon(Icons.timer, color: urgent ? Colors.redAccent : const Color(0xFF5E4FFF), size: 18),
-                const SizedBox(width: 8),
-                Text('Your seat time',
-                    style: TextStyle(color: urgent ? Colors.redAccent : Colors.white70, fontSize: 13)),
-              ]),
+              Row(
+                children: [
+                  Icon(
+                    Icons.timer,
+                    color: urgent ? Colors.redAccent : const Color(0xFF5E4FFF),
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Your seat time',
+                    style: TextStyle(
+                      color: urgent ? Colors.redAccent : Colors.white70,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
               Text(
                 '$m:$s',
                 style: TextStyle(
