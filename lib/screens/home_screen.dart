@@ -22,12 +22,22 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoadingLiveUsers = true;
   String? _liveUsersError;
   bool _isCallingPartner = false;
+  int _walletBalance = 0;
+  int _lastCallMinutes = 0;
+  int _lastCallChargedCoins = 0;
+  bool _hasLastCallSummary = false;
 
-  static const List<String> _titles = <String>['Live Connect', 'Gaming', 'Chat', 'Gifts'];
+  static const List<String> _titles = <String>[
+    'Live Connect',
+    'Gaming',
+    'Chat',
+    'Gifts',
+  ];
 
   StreamSubscription<List<Map<String, dynamic>>>? _liveUsersSubscription;
   StreamSubscription<Map<String, dynamic>>? _incomingCallSubscription;
   StreamSubscription<String>? _callFailedSubscription;
+  StreamSubscription<Map<String, dynamic>>? _callCoinsSettledSubscription;
 
   void _onItemTapped(int index) {
     setState(() {
@@ -56,7 +66,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _liveUsersSubscription = SocketService.instance.liveUsersStream.listen((users) {
+    _liveUsersSubscription = SocketService.instance.liveUsersStream.listen((
+      users,
+    ) {
       if (!mounted) return;
       setState(() {
         _liveUsers = users;
@@ -66,22 +78,65 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     // Listen for incoming calls so normal users can receive 1-to-1 audio calls
-    _incomingCallSubscription = SocketService.instance.incomingCallStream.listen((data) {
-      if (_isCallingPartner || !mounted) return;
-      final route = ModalRoute.of(context);
-      if (route == null || !route.isCurrent) return;
-      final callerId = data['callerId']?.toString() ?? '';
-      final callerName = data['callerName']?.toString() ?? 'Caller';
-      _showIncomingCallDialog(callerId: callerId, callerName: callerName);
-    });
+    _incomingCallSubscription = SocketService.instance.incomingCallStream
+        .listen((data) {
+          if (_isCallingPartner || !mounted) return;
+          final route = ModalRoute.of(context);
+          if (route == null || !route.isCurrent) return;
+          final callerId = data['callerId']?.toString() ?? '';
+          final callerName = data['callerName']?.toString() ?? 'Caller';
+          _showIncomingCallDialog(callerId: callerId, callerName: callerName);
+        });
 
-    _callFailedSubscription = SocketService.instance.callFailedStream.listen((reason) {
+    _callFailedSubscription = SocketService.instance.callFailedStream.listen((
+      reason,
+    ) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(reason), backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(reason), backgroundColor: Colors.redAccent),
+      );
       _isCallingPartner = false;
     });
 
+      _callCoinsSettledSubscription = SocketService.instance.callCoinsSettledStream
+        .listen((event) {
+          final minutesRaw = event['minutes'];
+          final chargedRaw = event['chargedCoins'];
+          final walletRaw = event['walletBalance'];
+          if (!mounted) return;
+          setState(() {
+          _lastCallMinutes = minutesRaw is int
+            ? minutesRaw
+            : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
+          _lastCallChargedCoins = chargedRaw is int
+            ? chargedRaw
+            : int.tryParse(chargedRaw?.toString() ?? '0') ?? 0;
+          _walletBalance = walletRaw is int
+            ? walletRaw
+            : int.tryParse(walletRaw?.toString() ?? '0') ?? _walletBalance;
+          _hasLastCallSummary = true;
+          });
+        });
+
+      final cachedCharged = SocketService.instance.getLastCallCoinsSettled();
+      if (cachedCharged != null) {
+        final minutesRaw = cachedCharged['minutes'];
+        final chargedRaw = cachedCharged['chargedCoins'];
+        final walletRaw = cachedCharged['walletBalance'];
+        _lastCallMinutes = minutesRaw is int
+          ? minutesRaw
+          : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
+        _lastCallChargedCoins = chargedRaw is int
+          ? chargedRaw
+          : int.tryParse(chargedRaw?.toString() ?? '0') ?? 0;
+        _walletBalance = walletRaw is int
+          ? walletRaw
+          : int.tryParse(walletRaw?.toString() ?? '0') ?? _walletBalance;
+        _hasLastCallSummary = true;
+      }
+
     _loadLiveUsers();
+    _loadWalletBalance();
   }
 
   @override
@@ -89,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _liveUsersSubscription?.cancel();
     _incomingCallSubscription?.cancel();
     _callFailedSubscription?.cancel();
+    _callCoinsSettledSubscription?.cancel();
     super.dispose();
   }
 
@@ -107,7 +163,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final liveUsers = await ApiService.getLiveUsers();
       if (!mounted) return;
       setState(() {
-        _liveUsers = liveUsers.map((user) => Map<String, dynamic>.from(user as Map<String, dynamic>)).toList();
+        _liveUsers = liveUsers
+            .map(
+              (user) => Map<String, dynamic>.from(user as Map<String, dynamic>),
+            )
+            .toList();
       });
     } catch (e) {
       if (mounted) {
@@ -124,26 +184,107 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _showIncomingCallDialog({required String callerId, required String callerName}) {
+  Future<void> _loadWalletBalance() async {
+    try {
+      final balance = await ApiService.getWalletBalance();
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = balance;
+      });
+    } catch (_) {
+      final fallback = ApiService.currentUser?['walletBalance'];
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = fallback is int
+            ? fallback
+            : int.tryParse(fallback?.toString() ?? '0') ?? 0;
+      });
+    }
+  }
+
+  Future<void> _showDepositCoinsDialog() async {
+    final controller = TextEditingController();
+    final coins = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Deposit Coins'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(hintText: 'Enter coin amount'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final value = int.tryParse(controller.text.trim());
+              Navigator.of(ctx).pop(value);
+            },
+            child: const Text('Deposit'),
+          ),
+        ],
+      ),
+    );
+
+    if (coins == null || coins <= 0) return;
+    try {
+      final updated = await ApiService.depositCoins(coins: coins);
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Deposited $coins coins. Balance: $_walletBalance'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  void _showIncomingCallDialog({
+    required String callerId,
+    required String callerName,
+  }) {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF12173A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Incoming Call', style: TextStyle(color: Colors.white)),
-        content: Text('$callerName wants to talk with you.',
-            style: const TextStyle(color: Colors.white70)),
+        title: const Text(
+          'Incoming Call',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          '$callerName wants to talk with you.',
+          style: const TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
               SocketService.instance.rejectCall(callerId);
             },
-            child: const Text('Decline', style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              'Decline',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3AA047)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF3AA047),
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               SocketService.instance.acceptCall(callerId);
@@ -168,16 +309,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _callPartner(Map<String, dynamic> user) {
+  Future<void> _callPartner(Map<String, dynamic> user) async {
     if (!SocketService.instance.isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not connected to live service.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not connected to live service.')),
+      );
       return;
     }
 
     final partnerId = user['id']?.toString();
     final name = user['name']?.toString() ?? 'Partner';
     if (partnerId == null || partnerId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to call partner')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Unable to call partner')));
       return;
     }
 
@@ -190,7 +335,8 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => CallScreen(partnerId: partnerId, partnerName: name, isCaller: true),
+        builder: (context) =>
+            CallScreen(partnerId: partnerId, partnerName: name, isCaller: true),
       ),
     ).then((_) {
       if (mounted) {
@@ -205,7 +351,10 @@ class _HomeScreenState extends State<HomeScreen> {
     SocketService.instance.disconnect();
     ApiService.logout();
     if (!mounted) return;
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+    );
   }
 
   @override
@@ -221,6 +370,17 @@ class _HomeScreenState extends State<HomeScreen> {
           style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
         ),
         actions: [
+          TextButton.icon(
+            onPressed: _showDepositCoinsDialog,
+            icon: const Icon(Icons.monetization_on, color: Colors.amberAccent),
+            label: Text(
+              '$_walletBalance',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
           IconButton(
             onPressed: _logout,
             icon: const Icon(Icons.logout, color: Colors.white),
@@ -236,7 +396,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 end: Alignment.bottomRight,
               ),
               boxShadow: [
-                BoxShadow(color: const Color.fromRGBO(0, 0, 0, 0.25), blurRadius: 18, offset: const Offset(0, 6)),
+                BoxShadow(
+                  color: const Color.fromRGBO(0, 0, 0, 0.25),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
+                ),
               ],
             ),
             child: const CircleAvatar(
@@ -257,12 +421,17 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: SafeArea(
           child: SingleChildScrollView(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 160),
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).padding.bottom + 160,
+            ),
             child: Column(
               children: [
                 if (_selectedIndex == 0) ...[
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 18),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24.0,
+                      vertical: 18,
+                    ),
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(22),
@@ -271,15 +440,32 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(30),
                         border: Border.all(color: Colors.white10),
                         boxShadow: [
-                          BoxShadow(color: const Color.fromRGBO(0, 0, 0, 0.28), blurRadius: 24, offset: const Offset(0, 16)),
+                          BoxShadow(
+                            color: const Color.fromRGBO(0, 0, 0, 0.28),
+                            blurRadius: 24,
+                            offset: const Offset(0, 16),
+                          ),
                         ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Good evening', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                          const Text(
+                            'Good evening',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 16,
+                            ),
+                          ),
                           const SizedBox(height: 6),
-                          const Text('Welcome back to FRND', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800)),
+                          const Text(
+                            'Welcome back to FRND',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                           const SizedBox(height: 20),
                           Row(
                             children: const [
@@ -287,7 +473,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               SizedBox(width: 12),
                               _QuickAction(icon: Icons.gamepad, label: 'Play'),
                               SizedBox(width: 12),
-                              _QuickAction(icon: Icons.card_giftcard, label: 'Gifts'),
+                              _QuickAction(
+                                icon: Icons.card_giftcard,
+                                label: 'Gifts',
+                              ),
                             ],
                           ),
                           const SizedBox(height: 22),
@@ -301,21 +490,31 @@ class _HomeScreenState extends State<HomeScreen> {
                               children: [
                                 const Padding(
                                   padding: EdgeInsets.all(16.0),
-                                  child: Icon(Icons.search, color: Colors.white54),
+                                  child: Icon(
+                                    Icons.search,
+                                    color: Colors.white54,
+                                  ),
                                 ),
                                 Expanded(
                                   child: TextField(
                                     decoration: const InputDecoration(
                                       hintText: 'Search friends, rooms, gifts',
-                                      hintStyle: TextStyle(color: Colors.white38),
+                                      hintStyle: TextStyle(
+                                        color: Colors.white38,
+                                      ),
                                       border: InputBorder.none,
                                     ),
                                     style: const TextStyle(color: Colors.white),
                                   ),
                                 ),
                                 const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 16.0),
-                                  child: Icon(Icons.tune, color: Colors.white54),
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 16.0,
+                                  ),
+                                  child: Icon(
+                                    Icons.tune,
+                                    color: Colors.white54,
+                                  ),
                                 ),
                               ],
                             ),
@@ -329,40 +528,94 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: const [
-                        Text('Friend circles', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                        Text('See all', style: TextStyle(color: Color(0xFFFF5AA2), fontSize: 14)),
+                        Text(
+                          'Friend circles',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'See all',
+                          style: TextStyle(
+                            color: Color(0xFFFF5AA2),
+                            fontSize: 14,
+                          ),
+                        ),
                       ],
                     ),
                   ),
+                  if (_hasLastCallSummary) ...[
+                    const SizedBox(height: 14),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF151A42),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.white10),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Last call: $_lastCallMinutes min',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Charged: $_lastCallChargedCoins',
+                              style: const TextStyle(
+                                color: Colors.orangeAccent,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   SizedBox(
                     height: 140,
                     child: _isLoadingLiveUsers
                         ? const Center(child: CircularProgressIndicator())
                         : _liveUsersError != null
-                            ? Center(child: Text(_liveUsersError!, style: const TextStyle(color: Colors.redAccent)))
-                            : _liveUsers.isNotEmpty
-                                ? ListView(
-                                    scrollDirection: Axis.horizontal,
-                                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                                    children: _liveUsers.map((user) {
-                                      return GestureDetector(
-                                        onTap: () => _callPartner(user),
-                                        child: _FriendCard(
-                                          name: user['name'] as String,
-                                          status: 'Live',
-                                          color: const Color(0xFF56CCF2),
-                                          isOnline: user['isOnline'] == true,
-                                        ),
-                                      );
-                                    }).toList(),
-                                  )
-                                : const Center(
-                                    child: Text(
-                                      'No live partners available right now.',
-                                      style: TextStyle(color: Colors.white54),
-                                    ),
-                                  ),
+                        ? Center(
+                            child: Text(
+                              _liveUsersError!,
+                              style: const TextStyle(color: Colors.redAccent),
+                            ),
+                          )
+                        : _liveUsers.isNotEmpty
+                        ? ListView(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24.0,
+                            ),
+                            children: _liveUsers.map((user) {
+                              return GestureDetector(
+                                onTap: () => _callPartner(user),
+                                child: _FriendCard(
+                                  name: user['name'] as String,
+                                  status: 'Live',
+                                  color: const Color(0xFF56CCF2),
+                                  isOnline: user['isOnline'] == true,
+                                ),
+                              );
+                            }).toList(),
+                          )
+                        : const Center(
+                            child: Text(
+                              'No live partners available right now.',
+                              style: TextStyle(color: Colors.white54),
+                            ),
+                          ),
                   ),
                   const SizedBox(height: 18),
                 ],
@@ -390,9 +643,15 @@ class _HomeScreenState extends State<HomeScreen> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.mic), label: 'Live'),
-          BottomNavigationBarItem(icon: Icon(Icons.videogame_asset), label: 'Gaming'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.videogame_asset),
+            label: 'Gaming',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Chat'),
-          BottomNavigationBarItem(icon: Icon(Icons.card_giftcard), label: 'Gifts'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.card_giftcard),
+            label: 'Gifts',
+          ),
         ],
       ),
     );
@@ -418,7 +677,10 @@ class _QuickAction extends StatelessWidget {
           children: [
             Icon(icon, color: const Color(0xFFFF5AA2), size: 24),
             const SizedBox(height: 8),
-            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
           ],
         ),
       ),
@@ -432,7 +694,12 @@ class _FriendCard extends StatelessWidget {
   final Color color;
   final bool isOnline;
 
-  const _FriendCard({required this.name, required this.status, required this.color, this.isOnline = false});
+  const _FriendCard({
+    required this.name,
+    required this.status,
+    required this.color,
+    this.isOnline = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -453,14 +720,32 @@ class _FriendCard extends StatelessWidget {
             height: 48,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(colors: [color.withAlpha(242), color.withAlpha(115)]),
+              gradient: LinearGradient(
+                colors: [color.withAlpha(242), color.withAlpha(115)],
+              ),
             ),
             child: Center(
-              child: Text(name[0], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+              child: Text(
+                name[0],
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 8),
-          Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis, maxLines: 1),
+          Text(
+            name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
           const SizedBox(height: 6),
           Row(
             children: [
@@ -474,7 +759,13 @@ class _FriendCard extends StatelessWidget {
                   ),
                 ),
               if (isOnline) const SizedBox(width: 6),
-              Text(status, style: TextStyle(color: isOnline ? Colors.green.shade200 : Colors.white54, fontSize: 12)),
+              Text(
+                status,
+                style: TextStyle(
+                  color: isOnline ? Colors.green.shade200 : Colors.white54,
+                  fontSize: 12,
+                ),
+              ),
             ],
           ),
         ],

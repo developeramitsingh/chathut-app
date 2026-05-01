@@ -22,6 +22,14 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   List<Map<String, dynamic>> _rooms = [];
   bool _roomsLoading = true;
   String? _roomsError;
+  int _walletBalance = 0;
+  int _totalEarnings = 0;
+  int _lastCallMinutes = 0;
+  int _lastCallChargedCoins = 0;
+  int _lastCallEarnedCoins = 0;
+  bool _hasLastCallSummary = false;
+  StreamSubscription<Map<String, dynamic>>? _callCoinsSettledSubscription;
+  StreamSubscription<Map<String, dynamic>>? _callEarningsCreditedSubscription;
 
   @override
   void initState() {
@@ -48,15 +56,99 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
           _incomingCallerId = null;
         });
       }
+      _loadWalletSummary();
     });
 
+      _callCoinsSettledSubscription = SocketService.instance.callCoinsSettledStream
+        .listen((event) {
+          final minutesRaw = event['minutes'];
+          final chargedRaw = event['chargedCoins'];
+          final walletRaw = event['walletBalance'];
+          if (!mounted) return;
+          setState(() {
+          _lastCallMinutes = minutesRaw is int
+            ? minutesRaw
+            : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
+          _lastCallChargedCoins = chargedRaw is int
+            ? chargedRaw
+            : int.tryParse(chargedRaw?.toString() ?? '0') ?? 0;
+          _lastCallEarnedCoins = 0;
+          _walletBalance = walletRaw is int
+            ? walletRaw
+            : int.tryParse(walletRaw?.toString() ?? '0') ?? _walletBalance;
+          _hasLastCallSummary = true;
+          });
+        });
+
+      _callEarningsCreditedSubscription = SocketService
+        .instance
+        .callEarningsCreditedStream
+        .listen((event) {
+          final minutesRaw = event['minutes'];
+          final earnedRaw = event['creditedCoins'];
+          final walletRaw = event['walletBalance'];
+          if (!mounted) return;
+          setState(() {
+          _lastCallMinutes = minutesRaw is int
+            ? minutesRaw
+            : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
+          _lastCallEarnedCoins = earnedRaw is int
+            ? earnedRaw
+            : int.tryParse(earnedRaw?.toString() ?? '0') ?? 0;
+          _lastCallChargedCoins = 0;
+          _walletBalance = walletRaw is int
+            ? walletRaw
+            : int.tryParse(walletRaw?.toString() ?? '0') ?? _walletBalance;
+          _hasLastCallSummary = true;
+          });
+        });
+
+      final cachedEarned = SocketService.instance.getLastCallEarningsCredited();
+      if (cachedEarned != null) {
+        final minutesRaw = cachedEarned['minutes'];
+        final earnedRaw = cachedEarned['creditedCoins'];
+        final walletRaw = cachedEarned['walletBalance'];
+        _lastCallMinutes = minutesRaw is int
+          ? minutesRaw
+          : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
+        _lastCallEarnedCoins = earnedRaw is int
+          ? earnedRaw
+          : int.tryParse(earnedRaw?.toString() ?? '0') ?? 0;
+        _lastCallChargedCoins = 0;
+        _walletBalance = walletRaw is int
+          ? walletRaw
+          : int.tryParse(walletRaw?.toString() ?? '0') ?? _walletBalance;
+        _hasLastCallSummary = true;
+      }
+
+      final cachedCharged = SocketService.instance.getLastCallCoinsSettled();
+      if (cachedCharged != null && !_hasLastCallSummary) {
+        final minutesRaw = cachedCharged['minutes'];
+        final chargedRaw = cachedCharged['chargedCoins'];
+        final walletRaw = cachedCharged['walletBalance'];
+        _lastCallMinutes = minutesRaw is int
+          ? minutesRaw
+          : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
+        _lastCallChargedCoins = chargedRaw is int
+          ? chargedRaw
+          : int.tryParse(chargedRaw?.toString() ?? '0') ?? 0;
+        _lastCallEarnedCoins = 0;
+        _walletBalance = walletRaw is int
+          ? walletRaw
+          : int.tryParse(walletRaw?.toString() ?? '0') ?? _walletBalance;
+        _hasLastCallSummary = true;
+      }
+
     _loadRooms();
+    _loadWalletSummary();
   }
 
   @override
   void dispose() {
     _incomingCallSubscription?.cancel();
     _callEndedSubscription?.cancel();
+    _callCoinsSettledSubscription?.cancel();
+    _callEarningsCreditedSubscription?.cancel();
     super.dispose();
   }
 
@@ -112,6 +204,33 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
           _roomsLoading = false;
         });
       }
+    }
+  }
+
+  Future<void> _loadWalletSummary() async {
+    try {
+      final summary = await ApiService.getWalletSummary();
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = summary['walletBalance'] ?? 0;
+        _totalEarnings = summary['totalEarnings'] ?? 0;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = ApiService.currentUser?['walletBalance'] is int
+            ? ApiService.currentUser!['walletBalance'] as int
+            : int.tryParse(
+                    ApiService.currentUser?['walletBalance']?.toString() ?? '0',
+                  ) ??
+                  0;
+        _totalEarnings = ApiService.currentUser?['totalEarnings'] is int
+            ? ApiService.currentUser!['totalEarnings'] as int
+            : int.tryParse(
+                    ApiService.currentUser?['totalEarnings']?.toString() ?? '0',
+                  ) ??
+                  0;
+      });
     }
   }
 
@@ -194,6 +313,79 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1E45),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.account_balance_wallet,
+                    color: Colors.amberAccent,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Wallet: $_walletBalance coins',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'Earnings: $_totalEarnings',
+                    style: const TextStyle(
+                      color: Colors.greenAccent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_hasLastCallSummary) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161A3F),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Last call: $_lastCallMinutes min',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      'Charged: $_lastCallChargedCoins',
+                      style: const TextStyle(
+                        color: Colors.orangeAccent,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Earned: $_lastCallEarnedCoins',
+                      style: const TextStyle(
+                        color: Colors.greenAccent,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
             const Text(
               'You are now available to accept incoming calls from users.',
               style: TextStyle(color: Colors.white70, fontSize: 16),

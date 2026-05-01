@@ -76,7 +76,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     _callEndedSub?.cancel();
     final id = _roomId;
     if (id != null) SocketService.instance.unsubscribeRoom(id);
-    _teardownAudio(notify: false);
+    _teardownAudio(notify: false, updateUi: false);
     _remoteRenderer.dispose();
     super.dispose();
   }
@@ -803,7 +803,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     _pendingCandidates.clear();
   }
 
-  void _teardownAudio({required bool notify}) {
+  void _teardownAudio({required bool notify, bool updateUi = true}) {
     if (notify && _connectedPartnerId != null) {
       SocketService.instance.endCall(_connectedPartnerId!);
     }
@@ -824,7 +824,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       SocketService.instance.clearLastOffer(prev);
       SocketService.instance.clearLastCallAccepted();
     }
-    if (mounted)
+    if (updateUi && mounted)
       setState(() {
         _audioConnected = false;
         _audioConnecting = false;

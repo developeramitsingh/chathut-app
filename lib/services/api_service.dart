@@ -129,6 +129,97 @@ class ApiService {
     return body;
   }
 
+  static Future<int> getWalletBalance() async {
+    final uri = Uri.parse('$baseUrl/users/wallet');
+    final response = await http.get(uri, headers: headers);
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200) {
+      throw Exception(
+        body['message'] ??
+            'Unable to load wallet (status ${response.statusCode})',
+      );
+    }
+    final summary = _parseWalletSummary(body);
+    if (currentUser != null) {
+      currentUser!['walletBalance'] = summary['walletBalance'];
+      currentUser!['totalEarnings'] = summary['totalEarnings'];
+    }
+    return summary['walletBalance'] as int;
+  }
+
+  static Future<Map<String, int>> getWalletSummary() async {
+    final uri = Uri.parse('$baseUrl/users/wallet');
+    final response = await http.get(uri, headers: headers);
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200) {
+      throw Exception(
+        body['message'] ??
+            'Unable to load wallet (status ${response.statusCode})',
+      );
+    }
+
+    final summary = _parseWalletSummary(body);
+    if (currentUser != null) {
+      currentUser!['walletBalance'] = summary['walletBalance'];
+      currentUser!['totalEarnings'] = summary['totalEarnings'];
+    }
+    return summary;
+  }
+
+  static Future<int> depositCoins({required int coins}) async {
+    final uri = Uri.parse('$baseUrl/users/wallet/deposit');
+    final response = await http.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({'coins': coins}),
+    );
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception(
+        body['message'] ??
+            'Unable to deposit coins (status ${response.statusCode})',
+      );
+    }
+    final summary = _parseWalletSummary(body);
+    if (currentUser != null) {
+      currentUser!['walletBalance'] = summary['walletBalance'];
+      currentUser!['totalEarnings'] = summary['totalEarnings'];
+    }
+    return summary['walletBalance'] as int;
+  }
+
+  static Future<int> debitFriendCircleMinute() async {
+    final uri = Uri.parse('$baseUrl/users/wallet/debit-friend-circle-minute');
+    final response = await http.post(uri, headers: headers);
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception(
+        body['message'] ??
+            'Unable to debit coins (status ${response.statusCode})',
+      );
+    }
+    final walletBalance = body['walletBalance'];
+    final parsed = walletBalance is int
+        ? walletBalance
+        : int.tryParse(walletBalance?.toString() ?? '0') ?? 0;
+    if (currentUser != null) {
+      currentUser!['walletBalance'] = parsed;
+    }
+    return parsed;
+  }
+
+  static Map<String, int> _parseWalletSummary(Map<String, dynamic> body) {
+    final walletBalanceRaw = body['walletBalance'];
+    final totalEarningsRaw = body['totalEarnings'];
+    final walletBalance = walletBalanceRaw is int
+        ? walletBalanceRaw
+        : int.tryParse(walletBalanceRaw?.toString() ?? '0') ?? 0;
+    final totalEarnings = totalEarningsRaw is int
+        ? totalEarningsRaw
+        : int.tryParse(totalEarningsRaw?.toString() ?? '0') ?? 0;
+    return {'walletBalance': walletBalance, 'totalEarnings': totalEarnings};
+  }
+
   static Future<Map<String, dynamic>> getRoom(String roomId) async {
     final uri = Uri.parse('$baseUrl/rooms/$roomId');
     final response = await http.get(uri, headers: headers);

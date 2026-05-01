@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import '../services/api_service.dart';
 import '../services/socket_service.dart';
 
 class CallScreen extends StatefulWidget {
@@ -28,6 +29,8 @@ class _CallScreenState extends State<CallScreen> {
   StreamSubscription<Map<String, dynamic>>? _offerSub;
   StreamSubscription<Map<String, dynamic>>? _answerSub;
   StreamSubscription<Map<String, dynamic>>? _candidateSub;
+  StreamSubscription<Map<String, dynamic>>? _callCoinsSettledSub;
+  StreamSubscription<Map<String, dynamic>>? _callEarningsCreditedSub;
 
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -37,6 +40,15 @@ class _CallScreenState extends State<CallScreen> {
   bool _offerSent = false;
   bool _remoteDescSet = false;
   bool _remoteAnswerSet = false;
+  bool _micMuted = false;
+  bool _speakerMuted = false;
+  int _walletBalance = 0;
+  int _elapsedSeconds = 0;
+  int _settledMinutes = 0;
+  int _chargedCoins = 0;
+  int _earnedCoins = 0;
+  bool _showEarnedStats = false;
+  Timer? _callTimer;
   final List<RTCIceCandidate> _pendingCandidates = [];
 
   @override
@@ -47,6 +59,10 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   void _listenSignaling() {
+    final role = ApiService.currentUser?['role']?.toString().toLowerCase();
+    final gender = ApiService.currentUser?['gender']?.toString().toLowerCase();
+    _showEarnedStats = role == 'partner' && gender == 'female';
+
     _callEndedSub = SocketService.instance.callEndedStream.listen((_) {
       if (mounted) Navigator.of(context).pop();
     });
@@ -95,6 +111,79 @@ class _CallScreenState extends State<CallScreen> {
       if (fromId != null && fromId != widget.partnerId) return;
       await _handleCandidate(data);
     });
+
+    _callCoinsSettledSub = SocketService.instance.callCoinsSettledStream.listen((
+      event,
+    ) {
+      final walletRaw = event['walletBalance'];
+      final chargedRaw = event['chargedCoins'];
+      final chargedDeltaRaw = event['chargedCoinsDelta'];
+      final minutesRaw = event['minutes'];
+      final wallet = walletRaw is int
+          ? walletRaw
+          : int.tryParse(walletRaw?.toString() ?? '0') ?? _walletBalance;
+      final charged = chargedRaw is int
+          ? chargedRaw
+          : int.tryParse(chargedRaw?.toString() ?? '0') ?? 0;
+      final chargedDelta = chargedDeltaRaw is int
+          ? chargedDeltaRaw
+          : int.tryParse(chargedDeltaRaw?.toString() ?? '0') ?? charged;
+      final minutes = minutesRaw is int
+          ? minutesRaw
+          : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = wallet;
+        _chargedCoins = charged;
+        _settledMinutes = minutes;
+      });
+      if (chargedDelta > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Charged $chargedDelta coin(s). Total charged: $charged. Balance: $wallet',
+            ),
+          ),
+        );
+      }
+    });
+
+    _callEarningsCreditedSub = SocketService.instance.callEarningsCreditedStream
+        .listen((event) {
+          if (!_showEarnedStats) return;
+          final walletRaw = event['walletBalance'];
+          final creditedRaw = event['creditedCoins'];
+          final creditedDeltaRaw = event['creditedCoinsDelta'];
+          final minutesRaw = event['minutes'];
+          final wallet = walletRaw is int
+              ? walletRaw
+              : int.tryParse(walletRaw?.toString() ?? '0') ?? _walletBalance;
+          final credited = creditedRaw is int
+              ? creditedRaw
+              : int.tryParse(creditedRaw?.toString() ?? '0') ?? 0;
+          final creditedDelta = creditedDeltaRaw is int
+              ? creditedDeltaRaw
+              : int.tryParse(creditedDeltaRaw?.toString() ?? '0') ?? credited;
+          final minutes = minutesRaw is int
+              ? minutesRaw
+              : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
+          if (!mounted) return;
+          setState(() {
+            _walletBalance = wallet;
+            _earnedCoins = credited;
+            _settledMinutes = minutes;
+          });
+          if (creditedDelta > 0) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Earned $creditedDelta coin(s). Total earned: $credited. Balance: $wallet',
+                ),
+                backgroundColor: const Color(0xFF1E7F3A),
+              ),
+            );
+          }
+        });
   }
 
   Future<void> _initWebRtc() async {
@@ -102,6 +191,7 @@ class _CallScreenState extends State<CallScreen> {
       '[CallScreen] init isCaller=${widget.isCaller} partner=${widget.partnerId}',
     );
     await _remoteRenderer.initialize();
+    await _loadWalletBalance();
 
     try {
       _localStream = await navigator.mediaDevices.getUserMedia({
@@ -180,6 +270,7 @@ class _CallScreenState extends State<CallScreen> {
       print('[CallScreen] connectionState=$state');
       if (!mounted) return;
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _startCallTimer();
         setState(() => _isConnecting = false);
       }
     };
@@ -189,6 +280,7 @@ class _CallScreenState extends State<CallScreen> {
       if (!mounted) return;
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        _startCallTimer();
         setState(() => _isConnecting = false);
       }
     };
@@ -197,7 +289,8 @@ class _CallScreenState extends State<CallScreen> {
       print('[CallScreen] onTrack streams=${event.streams.length}');
       if (event.streams.isNotEmpty) {
         _remoteRenderer.srcObject = event.streams[0];
-        _remoteRenderer.muted = false;
+        _remoteRenderer.muted = _speakerMuted;
+        _startCallTimer();
         if (mounted) setState(() => _isConnecting = false);
       }
     };
@@ -301,17 +394,77 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    _callTimer?.cancel();
     _callEndedSub?.cancel();
     _callFailedSub?.cancel();
     _callAcceptedSub?.cancel();
     _offerSub?.cancel();
     _answerSub?.cancel();
     _candidateSub?.cancel();
+    _callCoinsSettledSub?.cancel();
+    _callEarningsCreditedSub?.cancel();
     _localStream?.dispose();
     _remoteRenderer.srcObject = null;
     _remoteRenderer.dispose();
     _pc?.close();
     super.dispose();
+  }
+
+  Future<void> _loadWalletBalance() async {
+    try {
+      final balance = await ApiService.getWalletBalance();
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = balance;
+      });
+    } catch (_) {
+      final fallback = ApiService.currentUser?['walletBalance'];
+      final parsed = fallback is int
+          ? fallback
+          : int.tryParse(fallback?.toString() ?? '0') ?? 0;
+      if (!mounted) return;
+      setState(() {
+        _walletBalance = parsed;
+      });
+    }
+  }
+
+  void _startCallTimer() {
+    if (_callTimer != null) return;
+    _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _elapsedSeconds++;
+      });
+    });
+  }
+
+  String get _formattedDuration {
+    final minutes = (_elapsedSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (_elapsedSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  void _toggleMicMute() {
+    final stream = _localStream;
+    if (stream == null) return;
+    final nextMuted = !_micMuted;
+    for (final track in stream.getAudioTracks()) {
+      track.enabled = !nextMuted;
+    }
+    if (!mounted) return;
+    setState(() {
+      _micMuted = nextMuted;
+    });
+  }
+
+  void _toggleSpeakerMute() {
+    final nextMuted = !_speakerMuted;
+    _remoteRenderer.muted = nextMuted;
+    if (!mounted) return;
+    setState(() {
+      _speakerMuted = nextMuted;
+    });
   }
 
   void _endCall() {
@@ -367,6 +520,70 @@ class _CallScreenState extends State<CallScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF161A45),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Duration: $_formattedDuration',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    'Wallet: $_walletBalance',
+                    style: const TextStyle(
+                      color: Colors.amberAccent,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF14183F),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Billed: $_settledMinutes min',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    'Charged: $_chargedCoins',
+                    style: const TextStyle(
+                      color: Colors.orangeAccent,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (_showEarnedStats)
+                    Text(
+                      'Earned: $_earnedCoins',
+                      style: const TextStyle(
+                        color: Color(0xFF5CE38E),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 300),
               child: _isConnecting
@@ -405,6 +622,39 @@ class _CallScreenState extends State<CallScreen> {
             ),
             SizedBox(width: 1, height: 1, child: RTCVideoView(_remoteRenderer)),
             const SizedBox(height: 40),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: _toggleMicMute,
+                  icon: Icon(_micMuted ? Icons.mic_off : Icons.mic),
+                  label: Text(_micMuted ? 'Unmute Mic' : 'Mute Mic'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF5E4FFF),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 18,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: _toggleSpeakerMute,
+                  icon: Icon(
+                    _speakerMuted ? Icons.volume_off : Icons.volume_up,
+                  ),
+                  label: Text(_speakerMuted ? 'Unmute Spk' : 'Mute Spk'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF3A3F7A),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 18,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: _endCall,
               icon: const Icon(Icons.call_end),

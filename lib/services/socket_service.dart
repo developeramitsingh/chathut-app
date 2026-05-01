@@ -19,6 +19,8 @@ class SocketService {
   final _answerController = StreamController<Map<String, dynamic>>.broadcast();
   final _candidateController = StreamController<Map<String, dynamic>>.broadcast();
   final _roomUpdateController = StreamController<Map<String, dynamic>>.broadcast();
+  final _callCoinsSettledController = StreamController<Map<String, dynamic>>.broadcast();
+  final _callEarningsCreditedController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<List<Map<String, dynamic>>> get liveUsersStream => _liveUsersController.stream;
   Stream<Map<String, dynamic>> get incomingCallStream => _incomingCallController.stream;
@@ -29,12 +31,16 @@ class SocketService {
   Stream<Map<String, dynamic>> get answerStream => _answerController.stream;
   Stream<Map<String, dynamic>> get candidateStream => _candidateController.stream;
   Stream<Map<String, dynamic>> get roomUpdateStream => _roomUpdateController.stream;
+  Stream<Map<String, dynamic>> get callCoinsSettledStream => _callCoinsSettledController.stream;
+  Stream<Map<String, dynamic>> get callEarningsCreditedStream => _callEarningsCreditedController.stream;
 
   bool get isConnected => _socket?.connected == true;
 
   Map<String, dynamic>? _cachedCallAccepted;
   final Map<String, Map<String, dynamic>> _cachedOffers = {};
   final Map<String, Map<String, dynamic>> _cachedAnswers = {};
+  Map<String, dynamic>? _cachedCallCoinsSettled;
+  Map<String, dynamic>? _cachedCallEarningsCredited;
   String? _subscribedRoomId;
 
   Map<String, dynamic>? getLastCallAccepted(String partnerId) {
@@ -46,6 +52,19 @@ class SocketService {
 
   Map<String, dynamic>? getLastOffer(String fromId) => _cachedOffers[fromId];
   Map<String, dynamic>? getLastAnswer(String fromId) => _cachedAnswers[fromId];
+  Map<String, dynamic>? getLastCallCoinsSettled() => _cachedCallCoinsSettled;
+  Map<String, dynamic>? getLastCallEarningsCredited() {
+    if (!_isPartnerFemaleUser()) {
+      return null;
+    }
+    return _cachedCallEarningsCredited;
+  }
+
+  bool _isPartnerFemaleUser() {
+    final role = ApiService.currentUser?['role']?.toString().toLowerCase();
+    final gender = ApiService.currentUser?['gender']?.toString().toLowerCase();
+    return role == 'partner' && gender == 'female';
+  }
 
   void clearLastCallAccepted() {
     _cachedCallAccepted = null;
@@ -149,6 +168,24 @@ class SocketService {
     _socket!.on('callFailed', (data) {
       final reason = data is Map && data['reason'] is String ? data['reason'] as String : 'Call failed';
       _callFailedController.add(reason);
+    });
+
+    _socket!.on('callCoinsSettled', (data) {
+      if (data is Map) {
+        final event = Map<String, dynamic>.from(data.cast<String, dynamic>());
+        _cachedCallCoinsSettled = event;
+        _callCoinsSettledController.add(event);
+      }
+    });
+
+    _socket!.on('callEarningsCredited', (data) {
+      if (data is Map) {
+        final event = Map<String, dynamic>.from(data.cast<String, dynamic>());
+        if (_isPartnerFemaleUser()) {
+          _cachedCallEarningsCredited = event;
+        }
+        _callEarningsCreditedController.add(event);
+      }
     });
 
     _socket!.on('disconnect', (_) {
@@ -255,6 +292,8 @@ class SocketService {
     _answerController.close();
     _candidateController.close();
     _roomUpdateController.close();
+    _callCoinsSettledController.close();
+    _callEarningsCreditedController.close();
     disconnect();
   }
 }
