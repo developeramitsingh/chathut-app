@@ -61,7 +61,9 @@ class ApiService {
 
     final body = _decodeJson(response.body);
     if (response.statusCode != 201 && response.statusCode != 200) {
-      throw Exception(body['message'] ?? 'Signup failed (status ${response.statusCode})');
+      throw Exception(
+        body['message'] ?? 'Signup failed (status ${response.statusCode})',
+      );
     }
 
     return body;
@@ -77,7 +79,10 @@ class ApiService {
 
     final body = _decodeJson(response.body);
     if (response.statusCode != 200) {
-      throw Exception(body['message'] ?? 'Unable to request OTP (status ${response.statusCode})');
+      throw Exception(
+        body['message'] ??
+            'Unable to request OTP (status ${response.statusCode})',
+      );
     }
   }
 
@@ -93,7 +98,9 @@ class ApiService {
     );
     final body = _decodeJson(response.body);
     if (response.statusCode != 200) {
-      throw Exception(body['message'] ?? 'Login failed (status ${response.statusCode})');
+      throw Exception(
+        body['message'] ?? 'Login failed (status ${response.statusCode})',
+      );
     }
 
     token = body['accessToken'] as String?;
@@ -115,7 +122,9 @@ class ApiService {
     final response = await http.get(uri, headers: headers);
     final body = _decodeJsonList(response.body);
     if (response.statusCode != 200) {
-      throw Exception('Unable to load live users (status ${response.statusCode})');
+      throw Exception(
+        'Unable to load live users (status ${response.statusCode})',
+      );
     }
     return body;
   }
@@ -125,37 +134,146 @@ class ApiService {
     final response = await http.get(uri, headers: headers);
     final body = _decodeJson(response.body);
     if (response.statusCode != 200) {
-      throw Exception(body['message'] ?? 'Unable to load room (status ${response.statusCode})');
+      throw Exception(
+        body['message'] ??
+            'Unable to load room (status ${response.statusCode})',
+      );
     }
     return body;
   }
 
   static Future<Map<String, dynamic>> createRoom({required String name}) async {
     final uri = Uri.parse('$baseUrl/rooms');
-    final response = await http.post(uri, headers: headers, body: jsonEncode({'name': name}));
+    final response = await http.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({'name': name}),
+    );
     final body = _decodeJson(response.body);
     if (response.statusCode != 201 && response.statusCode != 200) {
-      throw Exception(body['message'] ?? 'Unable to create room (status ${response.statusCode})');
+      throw Exception(
+        body['message'] ??
+            'Unable to create room (status ${response.statusCode})',
+      );
     }
     return body;
   }
 
-  static Future<Map<String, dynamic>> joinRoom({required String roomId, required String role}) async {
+  static Future<Map<String, dynamic>> joinRoom({
+    required String roomId,
+    required String role,
+  }) async {
     final uri = Uri.parse('$baseUrl/rooms/$roomId/join');
-    final response = await http.post(uri, headers: headers, body: jsonEncode({'role': role}));
+    final response = await http.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({'role': role}),
+    );
     final body = _decodeJson(response.body);
     if (response.statusCode != 200 && response.statusCode != 201) {
-      throw Exception(body['message'] ?? 'Unable to join room (status ${response.statusCode})');
+      throw Exception(
+        body['message'] ??
+            'Unable to join room (status ${response.statusCode})',
+      );
     }
     return body;
   }
 
-  static Future<Map<String, dynamic>> leaveRoom({required String roomId}) async {
+  static Future<Map<String, dynamic>> requestJoinRoom({
+    required String roomId,
+    required String role,
+  }) async {
+    final uri = Uri.parse('$baseUrl/rooms/$roomId/request-join');
+    final response = await http.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({'role': role}),
+    );
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception(
+        body['message'] ??
+            'Unable to request join (status ${response.statusCode})',
+      );
+    }
+    return body;
+  }
+
+  static Future<Map<String, dynamic>> approveJoinRequest({
+    required String roomId,
+    required String userId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/rooms/$roomId/requests/$userId/approve');
+    final response = await http.post(uri, headers: headers);
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception(
+        body['message'] ??
+            'Unable to approve request (status ${response.statusCode})',
+      );
+    }
+    return body;
+  }
+
+  static Future<Map<String, dynamic>> rejectJoinRequest({
+    required String roomId,
+    required String userId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/rooms/$roomId/requests/$userId/reject');
+    final response = await http.post(uri, headers: headers);
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception(
+        body['message'] ??
+            'Unable to reject request (status ${response.statusCode})',
+      );
+    }
+    return body;
+  }
+
+  static Future<Map<String, dynamic>> removeRoomParticipant({
+    required String roomId,
+    required String userId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/rooms/$roomId/remove-participant');
+    final response = await http.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({'userId': userId}),
+    );
+    final body = _decodeJson(response.body);
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception(
+        body['message'] ??
+            'Unable to remove participant (status ${response.statusCode})',
+      );
+    }
+    return body;
+  }
+
+  static Future<void> deleteRoom({required String roomId}) async {
+    final uri = Uri.parse('$baseUrl/rooms/$roomId');
+    final response = await http.delete(uri, headers: headers);
+    if (response.statusCode != 200 && response.statusCode != 204) {
+      final body = _decodeJson(response.body);
+      throw Exception(
+        body['message'] ??
+            'Unable to delete room (status ${response.statusCode})',
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>> leaveRoom({
+    required String roomId,
+  }) async {
     final uri = Uri.parse('$baseUrl/rooms/$roomId/leave');
     final response = await http.post(uri, headers: headers);
     final body = _decodeJson(response.body);
     if (response.statusCode != 200 && response.statusCode != 201) {
-      throw Exception(body['message'] ?? 'Unable to leave room (status ${response.statusCode})');
+      throw Exception(
+        body['message'] ??
+            'Unable to leave room (status ${response.statusCode})',
+      );
     }
     return body;
   }

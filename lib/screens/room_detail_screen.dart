@@ -107,6 +107,16 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   bool get _isPartner => _me?['role'] == 'partner';
   bool get _isNormalUser => _me?['role'] == 'user';
 
+  List<Map<String, dynamic>> get _joinRequests =>
+      List<Map<String, dynamic>>.from(
+        _room['joinRequests'] as List<dynamic>? ?? [],
+      );
+
+  List<Map<String, dynamic>> get _participants =>
+      List<Map<String, dynamic>>.from(
+        _room['participants'] as List<dynamic>? ?? [],
+      );
+
   bool get _isQueued {
     if (_me == null || _room['queue'] == null) return false;
     final q = List<dynamic>.from(_room['queue'] as List);
@@ -114,6 +124,20 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       final m = e as Map<String, dynamic>;
       return m['userId']?.toString() == _myId || m['userName'] == _me!['name'];
     });
+  }
+
+  bool get _hasPendingRequest {
+    if (_myId == null) return false;
+    return _joinRequests.any((entry) => entry['userId']?.toString() == _myId);
+  }
+
+  bool get _isListenerParticipant {
+    if (_myId == null) return false;
+    return _participants.any(
+      (entry) =>
+          entry['userId']?.toString() == _myId &&
+          entry['role']?.toString() == 'listener',
+    );
   }
 
   int get _queuePosition {
@@ -238,14 +262,14 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       _message = null;
     });
     try {
-      await ApiService.joinRoom(roomId: id, role: role);
+      await ApiService.requestJoinRoom(roomId: id, role: role);
       await _refreshRoom();
       if (mounted) {
         final msg = role == 'femaleSpeaker'
-            ? 'Joined as partner speaker'
+            ? 'Partner speaker request sent to host'
             : role == 'coSpeaker' || role == 'normalSpeaker'
-            ? (_hasNormalSpeaker ? 'Added to queue' : 'Joined as co-speaker')
-            : 'Joined as listener';
+            ? 'Speaker request sent to host'
+            : 'Listener request sent to host';
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));
@@ -277,6 +301,155 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       if (mounted) setState(() => _message = e.toString());
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _approveJoinRequest(String userId) async {
+    final id = _roomId;
+    if (id == null) return;
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
+    try {
+      await ApiService.approveJoinRequest(roomId: id, userId: userId);
+      await _refreshRoom();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _message = e.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _rejectJoinRequest(String userId) async {
+    final id = _roomId;
+    if (id == null) return;
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
+    try {
+      await ApiService.rejectJoinRequest(roomId: id, userId: userId);
+      await _refreshRoom();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _message = e.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _removeParticipant(String userId, String userName) async {
+    final id = _roomId;
+    if (id == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove participant'),
+        content: Text('Remove $userName from this room?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
+    try {
+      await ApiService.removeRoomParticipant(roomId: id, userId: userId);
+      await _refreshRoom();
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$userName removed')));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _message = e.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _deleteRoom() async {
+    final id = _roomId;
+    if (id == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete room'),
+        content: const Text(
+          'This will permanently delete this room. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
+    try {
+      await ApiService.deleteRoom(roomId: id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Room deleted')));
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _message = e.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  String _roleLabel(String role) {
+    switch (role) {
+      case 'femaleSpeaker':
+        return 'Partner';
+      case 'coSpeaker':
+      case 'normalSpeaker':
+        return 'Joiner';
+      case 'queue':
+        return 'Queued';
+      case 'listener':
+      default:
+        return 'Listener';
     }
   }
 
@@ -363,9 +536,26 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   void _onIncomingCall(Map<String, dynamic> event) async {
     final callerId = event['callerId']?.toString();
     final callerName = event['callerName']?.toString() ?? 'Caller';
-    if (callerId == null || _audioConnected || _audioConnecting) return;
-    // Only female speaker auto-accepts (co-speaker is the one calling)
-    if (!_isFemaleSpeaker) return;
+    if (callerId == null || _audioConnected || _audioConnecting) {
+      return;
+    }
+
+    // Host approval can arrive to different clients with small timing differences.
+    // Re-sync room state before deciding whether this user is the active partner.
+    if (!_isFemaleSpeaker) {
+      await _refreshRoom();
+      if (!_isFemaleSpeaker) {
+        return;
+      }
+    }
+
+    final expectedCallerId = _room['otherSpeakerId']?.toString();
+    if (expectedCallerId != null &&
+        expectedCallerId.isNotEmpty &&
+        callerId != expectedCallerId) {
+      return;
+    }
+
     print('[LiveRoom] auto-accepting from $callerId ($callerName)');
     if (!mounted) return;
     setState(() {
@@ -647,6 +837,50 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     final queue = List<Map<String, dynamic>>.from(
       _room['queue'] as List<dynamic>? ?? [],
     );
+    final joinRequests = _joinRequests;
+    final participantMap = <String, Map<String, dynamic>>{};
+
+    void addManagedParticipant(String? userId, String? userName, String role) {
+      if (userId == null ||
+          userId.isEmpty ||
+          userId == _room['hostId']?.toString()) {
+        return;
+      }
+      participantMap[userId] = {
+        'userId': userId,
+        'userName': userName ?? 'User',
+        'role': role,
+      };
+    }
+
+    for (final entry in _participants) {
+      addManagedParticipant(
+        entry['userId']?.toString(),
+        entry['userName']?.toString(),
+        entry['role']?.toString() ?? 'listener',
+      );
+    }
+
+    addManagedParticipant(
+      _room['femaleSpeakerId']?.toString(),
+      _room['femaleSpeaker']?.toString(),
+      'femaleSpeaker',
+    );
+    addManagedParticipant(
+      _room['otherSpeakerId']?.toString(),
+      _room['otherSpeaker']?.toString(),
+      'coSpeaker',
+    );
+
+    for (final queuedUser in queue) {
+      addManagedParticipant(
+        queuedUser['userId']?.toString(),
+        queuedUser['userName']?.toString(),
+        'queue',
+      );
+    }
+
+    final managedParticipants = participantMap.values.toList();
 
     final audioStatus = _audioConnected
         ? _AudioStatus.live
@@ -786,6 +1020,144 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
 
             const SizedBox(height: 20),
 
+            if (_isHost) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Join requests (${joinRequests.length})',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (joinRequests.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF151A3C),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'No pending requests',
+                      style: TextStyle(color: Colors.white54),
+                    ),
+                  ),
+                )
+              else
+                ...joinRequests.map((entry) {
+                  final userId = entry['userId']?.toString() ?? '';
+                  final userName = entry['userName']?.toString() ?? 'User';
+                  final role = _roleLabel(
+                    entry['role']?.toString() ?? 'listener',
+                  );
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF151A3C),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF2A2F57)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '$userName • $role',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: userId.isEmpty
+                              ? null
+                              : () => _rejectJoinRequest(userId),
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.redAccent,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: userId.isEmpty
+                              ? null
+                              : () => _approveJoinRequest(userId),
+                          icon: const Icon(
+                            Icons.check,
+                            color: Color(0xFF3AA047),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              const SizedBox(height: 20),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Participants (${managedParticipants.length})',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (managedParticipants.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF151A3C),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'No participants to manage',
+                      style: TextStyle(color: Colors.white54),
+                    ),
+                  ),
+                )
+              else
+                ...managedParticipants.map((entry) {
+                  final userId = entry['userId']?.toString() ?? '';
+                  final userName = entry['userName']?.toString() ?? 'User';
+                  final role = _roleLabel(
+                    entry['role']?.toString() ?? 'listener',
+                  );
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF151A3C),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF2A2F57)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '$userName • $role',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: userId.isEmpty
+                              ? null
+                              : () => _removeParticipant(userId, userName),
+                          icon: const Icon(
+                            Icons.person_remove,
+                            color: Colors.redAccent,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              const SizedBox(height: 20),
+            ],
+
             // ── QUEUE ──────────────────────────────────────────────────────
             Align(
               alignment: Alignment.centerLeft,
@@ -900,11 +1272,11 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Listener join
-        if (!_isSpeaker && !_isQueued)
+        if (!_isHost && !_isSpeaker && !_isQueued && !_hasPendingRequest)
           ElevatedButton.icon(
             onPressed: () => _joinRoom('listener'),
             icon: const Icon(Icons.headphones),
-            label: const Text('Join as Listener'),
+            label: const Text('Request Listener Access'),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF5E4FFF),
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -915,12 +1287,13 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         if (!_hasFemaleSpeaker &&
             _isPartner &&
             !_isHost &&
-            !_isFemaleSpeaker) ...[
+            !_isFemaleSpeaker &&
+            !_hasPendingRequest) ...[
           const SizedBox(height: 10),
           ElevatedButton.icon(
             onPressed: () => _joinRoom('femaleSpeaker'),
             icon: const Icon(Icons.female),
-            label: const Text('Join as Partner Speaker'),
+            label: const Text('Request Partner Speaker Seat'),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFFF5AA2),
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -929,19 +1302,47 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         ],
 
         // Co-speaker / queue
-        if (_isNormalUser && !_isHost && !_isNormalSpeaker && !_isQueued) ...[
+        if (_isNormalUser &&
+            !_isHost &&
+            !_isNormalSpeaker &&
+            !_isQueued &&
+            !_hasPendingRequest) ...[
           const SizedBox(height: 10),
           ElevatedButton.icon(
             onPressed: () => _joinRoom('coSpeaker'),
             icon: Icon(_hasNormalSpeaker ? Icons.queue : Icons.mic),
             label: Text(
               _hasNormalSpeaker
-                  ? 'Queue for Speaker Seat'
-                  : 'Take Speaker Seat',
+                  ? 'Request Queue Position'
+                  : 'Request Speaker Seat',
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF8E44AD),
               padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ],
+
+        if (_hasPendingRequest) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1A40),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF5E4FFF)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.hourglass_top, color: Color(0xFF9C4FFF)),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Join request pending host approval',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1001,14 +1402,33 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         ],
 
         // Leave
-        if (_isFemaleSpeaker || _isNormalSpeaker || _isQueued) ...[
+        if (_isFemaleSpeaker ||
+            _isNormalSpeaker ||
+            _isQueued ||
+            _isListenerParticipant ||
+            _hasPendingRequest) ...[
           const SizedBox(height: 12),
           ElevatedButton.icon(
             onPressed: _leaveRoom,
             icon: const Icon(Icons.exit_to_app),
-            label: const Text('Leave Room / Queue'),
+            label: Text(
+              _hasPendingRequest ? 'Cancel Join Request' : 'Leave Room / Queue',
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFB03060),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ],
+
+        if (_isHost) ...[
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: _deleteRoom,
+            icon: const Icon(Icons.delete_forever),
+            label: const Text('Delete Room'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
           ),

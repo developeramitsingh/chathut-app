@@ -26,16 +26,17 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   @override
   void initState() {
     super.initState();
-    _incomingCallSubscription = SocketService.instance.incomingCallStream.listen((data) {
-      // Don't intercept when inside a room — RoomDetailScreen handles this
-      if (_isOnCall || !mounted) return;
-      final route = ModalRoute.of(context);
-      if (route == null || !route.isCurrent) return;
-      setState(() {
-        _incomingCallerName = data['callerName'] as String? ?? 'Caller';
-        _incomingCallerId = data['callerId'] as String?;
-      });
-    });
+    _incomingCallSubscription = SocketService.instance.incomingCallStream
+        .listen((data) {
+          // Don't intercept when inside a room — RoomDetailScreen handles this
+          if (_isOnCall || !mounted) return;
+          final route = ModalRoute.of(context);
+          if (route == null || !route.isCurrent) return;
+          setState(() {
+            _incomingCallerName = data['callerName'] as String? ?? 'Caller';
+            _incomingCallerId = data['callerId'] as String?;
+          });
+        });
 
     _callEndedSubscription = SocketService.instance.callEndedStream.listen((_) {
       if (_isOnCall) {
@@ -62,7 +63,11 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   Future<void> _acceptCall() async {
     if (_incomingCallerId == null) return;
     SocketService.instance.acceptCall(_incomingCallerId!);
-    _openCallScreen(partnerId: _incomingCallerId!, partnerName: _incomingCallerName ?? 'Caller', isCaller: false);
+    _openCallScreen(
+      partnerId: _incomingCallerId!,
+      partnerName: _incomingCallerName ?? 'Caller',
+      isCaller: false,
+    );
     setState(() {
       _incomingCallerName = null;
       _incomingCallerId = null;
@@ -89,7 +94,11 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
       final rooms = await ApiService.getRooms();
       if (!mounted) return;
       setState(() {
-        _rooms = rooms.map((room) => Map<String, dynamic>.from(room as Map<String, dynamic>)).toList();
+        _rooms = rooms
+            .map(
+              (room) => Map<String, dynamic>.from(room as Map<String, dynamic>),
+            )
+            .toList();
       });
     } catch (e) {
       if (mounted) {
@@ -108,14 +117,18 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
 
   Future<void> _joinPartnerSeat(String roomId) async {
     try {
-      await ApiService.joinRoom(roomId: roomId, role: 'femaleSpeaker');
+      await ApiService.requestJoinRoom(roomId: roomId, role: 'femaleSpeaker');
       await _loadRooms();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Joined room as partner speaker')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Join request sent to host')),
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     }
   }
@@ -124,10 +137,17 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
     SocketService.instance.disconnect();
     ApiService.logout();
     if (!mounted) return;
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+    );
   }
 
-  void _openCallScreen({required String partnerId, required String partnerName, required bool isCaller}) {
+  void _openCallScreen({
+    required String partnerId,
+    required String partnerName,
+    required bool isCaller,
+  }) {
     if (!mounted) return;
     setState(() {
       _isOnCall = true;
@@ -135,7 +155,11 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => CallScreen(partnerId: partnerId, partnerName: partnerName, isCaller: isCaller),
+        builder: (context) => CallScreen(
+          partnerId: partnerId,
+          partnerName: partnerName,
+          isCaller: isCaller,
+        ),
       ),
     ).then((_) {
       if (mounted) {
@@ -153,10 +177,7 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
       appBar: AppBar(
         title: const Text('Partner Dashboard'),
         actions: [
-          IconButton(
-            onPressed: _logout,
-            icon: const Icon(Icons.logout),
-          ),
+          IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
         ],
       ),
       body: Padding(
@@ -164,9 +185,19 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Welcome, ${user?['name'] ?? 'Partner'}', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+            Text(
+              'Welcome, ${user?['name'] ?? 'Partner'}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 16),
-            const Text('You are now available to accept incoming calls from users.', style: TextStyle(color: Colors.white70, fontSize: 16)),
+            const Text(
+              'You are now available to accept incoming calls from users.',
+              style: TextStyle(color: Colors.white70, fontSize: 16),
+            ),
             const SizedBox(height: 24),
             if (_incomingCallerName != null)
               Container(
@@ -179,16 +210,29 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Incoming call', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                    const Text(
+                      'Incoming call',
+                      style: TextStyle(color: Colors.white70, fontSize: 16),
+                    ),
                     const SizedBox(height: 12),
-                    Text(_incomingCallerName ?? 'Caller', style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                    Text(
+                      _incomingCallerName ?? 'Caller',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     Row(
                       children: [
                         Expanded(
                           child: ElevatedButton(
                             onPressed: _acceptCall,
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF5AA2), padding: const EdgeInsets.symmetric(vertical: 16)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFFF5AA2),
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                            ),
                             child: const Text('Accept Call'),
                           ),
                         ),
@@ -200,7 +244,10 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
                               side: const BorderSide(color: Color(0xFFFF5AA2)),
                               padding: const EdgeInsets.symmetric(vertical: 16),
                             ),
-                            child: const Text('Reject', style: TextStyle(color: Color(0xFFFF5AA2))),
+                            child: const Text(
+                              'Reject',
+                              style: TextStyle(color: Color(0xFFFF5AA2)),
+                            ),
                           ),
                         ),
                       ],
@@ -209,16 +256,32 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
                 ),
               ),
             if (_incomingCallerName == null)
-              const Text('Waiting for user calls…', style: TextStyle(color: Colors.white54, fontSize: 16)),
+              const Text(
+                'Waiting for user calls…',
+                style: TextStyle(color: Colors.white54, fontSize: 16),
+              ),
             const SizedBox(height: 24),
-            const Text('Available Rooms', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Available Rooms',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 12),
             if (_roomsLoading)
               const Center(child: CircularProgressIndicator())
             else if (_roomsError != null)
-              Text(_roomsError!, style: const TextStyle(color: Colors.redAccent))
+              Text(
+                _roomsError!,
+                style: const TextStyle(color: Colors.redAccent),
+              )
             else if (_rooms.isEmpty)
-              const Text('No active rooms at the moment.', style: TextStyle(color: Colors.white54))
+              const Text(
+                'No active rooms at the moment.',
+                style: TextStyle(color: Colors.white54),
+              )
             else
               Expanded(
                 child: ListView.builder(
@@ -244,12 +307,37 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(roomName, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                          Text(
+                            roomName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           const SizedBox(height: 6),
-                          Text('Host: $hostName', style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                          Text(
+                            'Host: $hostName',
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 13,
+                            ),
+                          ),
                           const SizedBox(height: 8),
-                          Text('Partner seat: ${femaleSpeaker ?? 'Open'}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                          Text('Speaker seat: ${otherSpeaker ?? 'Open'}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text(
+                            'Partner seat: ${femaleSpeaker ?? 'Open'}',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            'Speaker seat: ${otherSpeaker ?? 'Open'}',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           Row(
                             children: [
@@ -257,9 +345,23 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
                                 child: ElevatedButton(
                                   onPressed: isOwnPartnerSeat || !canJoinPartner
                                       ? null
-                                      : () => _joinPartnerSeat(room['_id']?.toString() ?? room['id'].toString()),
-                                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF5AA2), padding: const EdgeInsets.symmetric(vertical: 14)),
-                                  child: Text(isOwnPartnerSeat ? 'You are partner' : (canJoinPartner ? 'Join as Partner' : 'Partner taken')),
+                                      : () => _joinPartnerSeat(
+                                          room['_id']?.toString() ??
+                                              room['id'].toString(),
+                                        ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFFF5AA2),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    isOwnPartnerSeat
+                                        ? 'You are partner'
+                                        : (canJoinPartner
+                                              ? 'Join as Partner'
+                                              : 'Partner taken'),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -268,14 +370,24 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
                                   onPressed: () {
                                     Navigator.push(
                                       context,
-                                      MaterialPageRoute(builder: (context) => RoomDetailScreen(room: room)),
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            RoomDetailScreen(room: room),
+                                      ),
                                     );
                                   },
                                   style: OutlinedButton.styleFrom(
-                                    side: const BorderSide(color: Color(0xFFFF5AA2)),
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    side: const BorderSide(
+                                      color: Color(0xFFFF5AA2),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                    ),
                                   ),
-                                  child: const Text('View', style: TextStyle(color: Color(0xFFFF5AA2))),
+                                  child: const Text(
+                                    'View',
+                                    style: TextStyle(color: Color(0xFFFF5AA2)),
+                                  ),
                                 ),
                               ),
                             ],
