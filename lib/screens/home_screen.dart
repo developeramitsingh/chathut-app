@@ -71,6 +71,51 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<bool> _showCallRulesPopup({required String partnerName}) async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF151A42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text(
+          'Live Call Charges & Rules',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Text(
+          'You are about to connect with $partnerName.\n\n'
+          '• Charges: 1 coin per minute.\n'
+          '• Coins are deducted during the call.\n'
+          '• If wallet becomes zero, call will end automatically.\n'
+          '• Please keep the conversation respectful.',
+          style: const TextStyle(color: Colors.white70, height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF5AA2),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Agree & Connect'),
+          ),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
@@ -354,6 +399,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final name = user['name']?.toString() ?? 'Partner';
     if (partnerId == null || partnerId.isEmpty) {
       _showPopup(title: 'Call Failed', message: 'Unable to call partner.');
+      return;
+    }
+
+    final canProceed = await _showCallRulesPopup(partnerName: name);
+    if (!mounted) return;
+    if (!canProceed) {
       return;
     }
 
