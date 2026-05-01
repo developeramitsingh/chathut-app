@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import 'call_history_screen.dart';
 import 'call_screen.dart';
+import 'live_chat_screen.dart';
 import 'login_screen.dart';
 import 'room_detail_screen.dart';
 
@@ -31,6 +32,7 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   bool _hasLastCallSummary = false;
   StreamSubscription<Map<String, dynamic>>? _callCoinsSettledSubscription;
   StreamSubscription<Map<String, dynamic>>? _callEarningsCreditedSubscription;
+  StreamSubscription<Map<String, dynamic>>? _incomingDirectChatSubscription;
 
   Future<void> _showPopup({required String title, required String message}) async {
     if (!mounted) return;
@@ -64,6 +66,57 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
     );
   }
 
+  Future<void> _showIncomingChatDialog({
+    required String senderId,
+    required String senderName,
+    required String message,
+    required String sentAt,
+  }) async {
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF151A42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('Live Chat Message', style: TextStyle(color: Colors.white)),
+        content: Text(
+          '$senderName: $message',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Later', style: TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => LiveChatScreen(
+                    partnerId: senderId,
+                    partnerName: senderName,
+                    initialPartnerMessages: [
+                      {
+                        'text': message,
+                        'time': sentAt,
+                      },
+                    ],
+                  ),
+                ),
+              );
+            },
+            child: const Text('Open Chat'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -91,6 +144,25 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
       }
       _loadWalletSummary();
     });
+
+    _incomingDirectChatSubscription = SocketService
+        .instance
+        .incomingDirectChatMessageStream
+        .listen((event) {
+          final fromId = event['fromId']?.toString() ?? '';
+          if (fromId.isEmpty) return;
+          final fromName = event['fromName']?.toString() ?? 'User';
+          final message = event['message']?.toString() ?? '';
+          final sentAt =
+              event['sentAt']?.toString() ?? DateTime.now().toIso8601String();
+          if (message.isEmpty) return;
+          _showIncomingChatDialog(
+            senderId: fromId,
+            senderName: fromName,
+            message: message,
+            sentAt: sentAt,
+          );
+        });
 
       _callCoinsSettledSubscription = SocketService.instance.callCoinsSettledStream
         .listen((event) {
@@ -182,6 +254,7 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
     _callEndedSubscription?.cancel();
     _callCoinsSettledSubscription?.cancel();
     _callEarningsCreditedSubscription?.cancel();
+    _incomingDirectChatSubscription?.cancel();
     super.dispose();
   }
 

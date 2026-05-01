@@ -22,6 +22,7 @@ class SocketService {
   final _callCoinsSettledController = StreamController<Map<String, dynamic>>.broadcast();
   final _callEarningsCreditedController = StreamController<Map<String, dynamic>>.broadcast();
   final _lowCoinsWarningController = StreamController<Map<String, dynamic>>.broadcast();
+  final _incomingDirectChatMessageController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<List<Map<String, dynamic>>> get liveUsersStream => _liveUsersController.stream;
   Stream<Map<String, dynamic>> get incomingCallStream => _incomingCallController.stream;
@@ -35,6 +36,8 @@ class SocketService {
   Stream<Map<String, dynamic>> get callCoinsSettledStream => _callCoinsSettledController.stream;
   Stream<Map<String, dynamic>> get callEarningsCreditedStream => _callEarningsCreditedController.stream;
   Stream<Map<String, dynamic>> get lowCoinsWarningStream => _lowCoinsWarningController.stream;
+  Stream<Map<String, dynamic>> get incomingDirectChatMessageStream =>
+      _incomingDirectChatMessageController.stream;
 
   bool get isConnected => _socket?.connected == true;
 
@@ -197,6 +200,13 @@ class SocketService {
       }
     });
 
+    _socket!.on('incomingDirectChatMessage', (data) {
+      if (data is Map) {
+        final event = Map<String, dynamic>.from(data.cast<String, dynamic>());
+        _incomingDirectChatMessageController.add(event);
+      }
+    });
+
     _socket!.on('disconnect', (_) {
       _liveUsersController.add([]);
     });
@@ -276,6 +286,15 @@ class SocketService {
     _socket?.emit('audioChunk', {'to': targetId, 'data': payload});
   }
 
+  void sendDirectChatMessage(String targetId, String message) {
+    final text = message.trim();
+    if (text.isEmpty) return;
+    _socket?.emit('sendDirectChatMessage', {
+      'targetId': targetId,
+      'message': text,
+    });
+  }
+
   List<Map<String, dynamic>> _toUserList(dynamic data) {
     if (data is List) {
       return data.map<Map<String, dynamic>>((user) {
@@ -304,6 +323,7 @@ class SocketService {
     _callCoinsSettledController.close();
     _callEarningsCreditedController.close();
     _lowCoinsWarningController.close();
+    _incomingDirectChatMessageController.close();
     disconnect();
   }
 }

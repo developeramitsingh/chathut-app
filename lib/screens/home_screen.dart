@@ -6,6 +6,7 @@ import 'audio_room_screen.dart';
 import 'call_history_screen.dart';
 import 'call_screen.dart';
 import 'chat_room_screen.dart';
+import 'live_chat_screen.dart';
 import 'login_screen.dart';
 import 'gifting_screen.dart';
 
@@ -38,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<Map<String, dynamic>>? _incomingCallSubscription;
   StreamSubscription<String>? _callFailedSubscription;
   StreamSubscription<Map<String, dynamic>>? _callCoinsSettledSubscription;
+  StreamSubscription<Map<String, dynamic>>? _incomingDirectChatSubscription;
 
   Future<void> _showPopup({required String title, required String message}) async {
     if (!mounted) return;
@@ -116,6 +118,113 @@ class _HomeScreenState extends State<HomeScreen> {
     return result == true;
   }
 
+  Future<void> _showConnectOptions(Map<String, dynamic> user) async {
+    final partnerName = user['name']?.toString() ?? 'Partner';
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF151A42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(
+          'Connect with $partnerName',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Choose how you want to connect.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _openLiveChat(user);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3A9B5F)),
+            child: const Text('Live Chat (Free)'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _callPartner(user);
+            },
+            child: const Text('Live Call'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openLiveChat(Map<String, dynamic> user) {
+    final partnerId = user['id']?.toString();
+    final name = user['name']?.toString() ?? 'Partner';
+    if (partnerId == null || partnerId.isEmpty) {
+      _showPopup(title: 'Chat Failed', message: 'Unable to open live chat.');
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LiveChatScreen(partnerId: partnerId, partnerName: name),
+      ),
+    );
+  }
+
+  Future<void> _showIncomingChatDialog({
+    required String senderId,
+    required String senderName,
+    required String message,
+    required String sentAt,
+  }) async {
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF151A42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('Live Chat Message', style: TextStyle(color: Colors.white)),
+        content: Text(
+          '$senderName: $message',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Later', style: TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => LiveChatScreen(
+                    partnerId: senderId,
+                    partnerName: senderName,
+                    initialPartnerMessages: [
+                      {
+                        'text': message,
+                        'time': sentAt,
+                      },
+                    ],
+                  ),
+                ),
+              );
+            },
+            child: const Text('Open Chat'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
@@ -173,6 +282,25 @@ class _HomeScreenState extends State<HomeScreen> {
       _isCallingPartner = false;
     });
 
+    _incomingDirectChatSubscription = SocketService
+        .instance
+        .incomingDirectChatMessageStream
+        .listen((event) {
+          final fromId = event['fromId']?.toString() ?? '';
+          if (fromId.isEmpty) return;
+          final fromName = event['fromName']?.toString() ?? 'Partner';
+          final message = event['message']?.toString() ?? '';
+          final sentAt =
+              event['sentAt']?.toString() ?? DateTime.now().toIso8601String();
+          if (message.isEmpty) return;
+          _showIncomingChatDialog(
+            senderId: fromId,
+            senderName: fromName,
+            message: message,
+            sentAt: sentAt,
+          );
+        });
+
       _callCoinsSettledSubscription = SocketService.instance.callCoinsSettledStream
         .listen((event) {
           final minutesRaw = event['minutes'];
@@ -220,6 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _incomingCallSubscription?.cancel();
     _callFailedSubscription?.cancel();
     _callCoinsSettledSubscription?.cancel();
+    _incomingDirectChatSubscription?.cancel();
     super.dispose();
   }
 
@@ -682,7 +811,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             children: _liveUsers.map((user) {
                               return GestureDetector(
-                                onTap: () => _callPartner(user),
+                                onTap: () => _showConnectOptions(user),
                                 child: _FriendCard(
                                   name: user['name'] as String,
                                   status: 'Live',
