@@ -36,6 +36,7 @@ class _CallScreenState extends State<CallScreen> {
   bool _isConnecting = true;
   bool _offerSent = false;
   bool _remoteDescSet = false;
+  bool _remoteAnswerSet = false;
   final List<RTCIceCandidate> _pendingCandidates = [];
 
   @override
@@ -58,22 +59,29 @@ class _CallScreenState extends State<CallScreen> {
       );
     });
 
-    _callAcceptedSub =
-        SocketService.instance.callAcceptedStream.listen((data) async {
+    _callAcceptedSub = SocketService.instance.callAcceptedStream.listen((
+      data,
+    ) async {
       if (!widget.isCaller) return;
       final acceptedId = data['partnerId']?.toString();
       if (acceptedId != widget.partnerId) return;
       print('[CallScreen] callAccepted -> creating offer');
-      SocketService.instance.clearLastCallAccepted();
-      await _sendOffer();
+      final sent = await _sendOffer();
+      if (sent) {
+        SocketService.instance.clearLastCallAccepted();
+      }
     });
 
     _offerSub = SocketService.instance.offerStream.listen((data) async {
       final fromId = data['from']?.toString();
       if (widget.isCaller || fromId != widget.partnerId) return;
-      print('[CallScreen] offer received from $fromId, pc ready: ${_pc != null}');
-      await _handleOffer(data);
-      SocketService.instance.clearLastOffer(widget.partnerId);
+      print(
+        '[CallScreen] offer received from $fromId, pc ready: ${_pc != null}',
+      );
+      final handled = await _handleOffer(data);
+      if (handled) {
+        SocketService.instance.clearLastOffer(widget.partnerId);
+      }
     });
 
     _answerSub = SocketService.instance.answerStream.listen((data) async {
@@ -82,37 +90,68 @@ class _CallScreenState extends State<CallScreen> {
       await _handleAnswer(data);
     });
 
-    _candidateSub =
-        SocketService.instance.candidateStream.listen((data) async {
+    _candidateSub = SocketService.instance.candidateStream.listen((data) async {
+      final fromId = data['from']?.toString();
+      if (fromId != null && fromId != widget.partnerId) return;
       await _handleCandidate(data);
     });
   }
 
   Future<void> _initWebRtc() async {
     print(
-        '[CallScreen] init isCaller=${widget.isCaller} partner=${widget.partnerId}');
+      '[CallScreen] init isCaller=${widget.isCaller} partner=${widget.partnerId}',
+    );
     await _remoteRenderer.initialize();
 
-    _localStream = await navigator.mediaDevices
-        .getUserMedia({'audio': true, 'video': false});
+    try {
+      _localStream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': false,
+      });
+    } catch (e) {
+      print('[CallScreen] getUserMedia error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Microphone access denied: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        Navigator.of(context).pop();
+      }
+      return;
+    }
     _pc = await _buildPeerConnection();
 
     // Drain cached events that arrived before _pc was ready
     if (widget.isCaller) {
-      final accepted =
-          SocketService.instance.getLastCallAccepted(widget.partnerId);
+      final accepted = SocketService.instance.getLastCallAccepted(
+        widget.partnerId,
+      );
       if (accepted != null && !_offerSent) {
         print('[CallScreen] drain cached callAccepted');
-        SocketService.instance.clearLastCallAccepted();
-        await _sendOffer();
+        final sent = await _sendOffer();
+        if (sent) {
+          SocketService.instance.clearLastCallAccepted();
+        }
+      }
+
+      final cachedAnswer = SocketService.instance.getLastAnswer(
+        widget.partnerId,
+      );
+      if (cachedAnswer != null && !_remoteAnswerSet) {
+        print('[CallScreen] drain cached answer');
+        await _handleAnswer(cachedAnswer);
+        SocketService.instance.clearLastAnswer(widget.partnerId);
       }
     } else {
-      final cachedOffer =
-          SocketService.instance.getLastOffer(widget.partnerId);
+      final cachedOffer = SocketService.instance.getLastOffer(widget.partnerId);
       if (cachedOffer != null) {
         print('[CallScreen] drain cached offer');
-        await _handleOffer(cachedOffer);
-        SocketService.instance.clearLastOffer(widget.partnerId);
+        final handled = await _handleOffer(cachedOffer);
+        if (handled) {
+          SocketService.instance.clearLastOffer(widget.partnerId);
+        }
       }
     }
   }
@@ -158,6 +197,7 @@ class _CallScreenState extends State<CallScreen> {
       print('[CallScreen] onTrack streams=${event.streams.length}');
       if (event.streams.isNotEmpty) {
         _remoteRenderer.srcObject = event.streams[0];
+        _remoteRenderer.muted = false;
         if (mounted) setState(() => _isConnecting = false);
       }
     };
@@ -171,23 +211,26 @@ class _CallScreenState extends State<CallScreen> {
     return pc;
   }
 
-  Future<void> _sendOffer() async {
-    if (_offerSent || _pc == null) return;
+  Future<bool> _sendOffer() async {
+    if (_offerSent || _pc == null) return false;
     _offerSent = true;
     print('[CallScreen] _sendOffer');
     final offer = await _pc!.createOffer({'offerToReceiveAudio': true});
     await _pc!.setLocalDescription(offer);
     SocketService.instance.sendOffer(widget.partnerId, offer.toMap());
+    return true;
   }
 
-  Future<void> _handleOffer(Map<String, dynamic> data) async {
-    if (_pc == null) return;
+  Future<bool> _handleOffer(Map<String, dynamic> data) async {
+    if (_pc == null) return false;
     final offerMap = data['offer'] as Map<String, dynamic>?;
-    if (offerMap == null) return;
+    if (offerMap == null) return false;
 
     await _pc!.setRemoteDescription(
       RTCSessionDescription(
-          offerMap['sdp'] as String, offerMap['type'] as String),
+        offerMap['sdp'] as String,
+        offerMap['type'] as String,
+      ),
     );
     _remoteDescSet = true;
     await _flushPendingCandidates();
@@ -197,17 +240,23 @@ class _CallScreenState extends State<CallScreen> {
     final fromId = data['from']?.toString() ?? widget.partnerId;
     SocketService.instance.sendAnswer(fromId, answer.toMap());
     if (mounted) setState(() => _isConnecting = false);
+    return true;
   }
 
   Future<void> _handleAnswer(Map<String, dynamic> data) async {
     if (_pc == null) return;
+    final fromId = data['from']?.toString();
+    if (fromId != null && fromId != widget.partnerId) return;
     final answerMap = data['answer'] as Map<String, dynamic>?;
     if (answerMap == null) return;
 
     await _pc!.setRemoteDescription(
       RTCSessionDescription(
-          answerMap['sdp'] as String, answerMap['type'] as String),
+        answerMap['sdp'] as String,
+        answerMap['type'] as String,
+      ),
     );
+    _remoteAnswerSet = true;
     _remoteDescSet = true;
     await _flushPendingCandidates();
     if (mounted) setState(() => _isConnecting = false);
@@ -223,8 +272,7 @@ class _CallScreenState extends State<CallScreen> {
       candidateStr = raw['candidate']?.toString();
       sdpMid = raw['sdpMid']?.toString();
       final idx = raw['sdpMLineIndex'];
-      sdpMLineIndex =
-          idx is int ? idx : int.tryParse(idx?.toString() ?? '');
+      sdpMLineIndex = idx is int ? idx : int.tryParse(idx?.toString() ?? '');
     } else if (raw is String) {
       candidateStr = raw;
     }
@@ -243,7 +291,8 @@ class _CallScreenState extends State<CallScreen> {
   Future<void> _flushPendingCandidates() async {
     if (_pc == null || _pendingCandidates.isEmpty) return;
     print(
-        '[CallScreen] flushing ${_pendingCandidates.length} buffered candidates');
+      '[CallScreen] flushing ${_pendingCandidates.length} buffered candidates',
+    );
     for (final c in List<RTCIceCandidate>.from(_pendingCandidates)) {
       await _pc!.addCandidate(c);
     }
@@ -276,8 +325,7 @@ class _CallScreenState extends State<CallScreen> {
       backgroundColor: const Color(0xFF0D1030),
       appBar: AppBar(
         backgroundColor: const Color(0xFF10133D),
-        title:
-            const Text('Live Audio', style: TextStyle(color: Colors.white)),
+        title: const Text('Live Audio', style: TextStyle(color: Colors.white)),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Padding(
@@ -312,9 +360,10 @@ class _CallScreenState extends State<CallScreen> {
             Text(
               widget.partnerName,
               style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold),
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
@@ -327,38 +376,45 @@ class _CallScreenState extends State<CallScreen> {
                         SizedBox(height: 8),
                         CircularProgressIndicator(color: Color(0xFFFF5AA2)),
                         SizedBox(height: 12),
-                        Text('Connecting audio\u2026',
-                            style: TextStyle(
-                                color: Colors.white70, fontSize: 15)),
+                        Text(
+                          'Connecting audio\u2026',
+                          style: TextStyle(color: Colors.white70, fontSize: 15),
+                        ),
                       ],
                     )
                   : const Column(
                       key: ValueKey('live'),
                       children: [
                         SizedBox(height: 8),
-                        Icon(Icons.graphic_eq,
-                            color: Color(0xFF3AA047), size: 32),
+                        Icon(
+                          Icons.graphic_eq,
+                          color: Color(0xFF3AA047),
+                          size: 32,
+                        ),
                         SizedBox(height: 8),
-                        Text('Audio live',
-                            style: TextStyle(
-                                color: Color(0xFF3AA047),
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600)),
+                        Text(
+                          'Audio live',
+                          style: TextStyle(
+                            color: Color(0xFF3AA047),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ],
                     ),
             ),
-            SizedBox(
-                width: 1, height: 1, child: RTCVideoView(_remoteRenderer)),
+            SizedBox(width: 1, height: 1, child: RTCVideoView(_remoteRenderer)),
             const SizedBox(height: 40),
             ElevatedButton.icon(
               onPressed: _endCall,
               icon: const Icon(Icons.call_end),
-              label:
-                  const Text('End Call', style: TextStyle(fontSize: 16)),
+              label: const Text('End Call', style: TextStyle(fontSize: 16)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
                 padding: const EdgeInsets.symmetric(
-                    vertical: 16, horizontal: 40),
+                  vertical: 16,
+                  horizontal: 40,
+                ),
               ),
             ),
           ],

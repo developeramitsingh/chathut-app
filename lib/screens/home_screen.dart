@@ -26,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   static const List<String> _titles = <String>['Live Connect', 'Gaming', 'Chat', 'Gifts'];
 
   StreamSubscription<List<Map<String, dynamic>>>? _liveUsersSubscription;
-  StreamSubscription<Map<String, dynamic>>? _callAcceptedSubscription;
+  StreamSubscription<Map<String, dynamic>>? _incomingCallSubscription;
   StreamSubscription<String>? _callFailedSubscription;
 
   void _onItemTapped(int index) {
@@ -65,24 +65,14 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     });
 
-    _callAcceptedSubscription = SocketService.instance.callAcceptedStream.listen((data) {
-      // Only open CallScreen if HomeScreen is the active route (not when inside a room)
+    // Listen for incoming calls so normal users can receive 1-to-1 audio calls
+    _incomingCallSubscription = SocketService.instance.incomingCallStream.listen((data) {
       if (_isCallingPartner || !mounted) return;
       final route = ModalRoute.of(context);
       if (route == null || !route.isCurrent) return;
-      _isCallingPartner = true;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => CallScreen(
-            partnerId: data['partnerId'] as String? ?? '',
-            partnerName: data['partnerName'] as String? ?? 'Partner',
-            isCaller: true,
-          ),
-        ),
-      ).then((_) {
-        _isCallingPartner = false;
-      });
+      final callerId = data['callerId']?.toString() ?? '';
+      final callerName = data['callerName']?.toString() ?? 'Caller';
+      _showIncomingCallDialog(callerId: callerId, callerName: callerName);
     });
 
     _callFailedSubscription = SocketService.instance.callFailedStream.listen((reason) {
@@ -97,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _liveUsersSubscription?.cancel();
-    _callAcceptedSubscription?.cancel();
+    _incomingCallSubscription?.cancel();
     _callFailedSubscription?.cancel();
     super.dispose();
   }
@@ -134,6 +124,50 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showIncomingCallDialog({required String callerId, required String callerName}) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF12173A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Incoming Call', style: TextStyle(color: Colors.white)),
+        content: Text('$callerName wants to talk with you.',
+            style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              SocketService.instance.rejectCall(callerId);
+            },
+            child: const Text('Decline', style: TextStyle(color: Colors.redAccent)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3AA047)),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              SocketService.instance.acceptCall(callerId);
+              setState(() => _isCallingPartner = true);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CallScreen(
+                    partnerId: callerId,
+                    partnerName: callerName,
+                    isCaller: false,
+                  ),
+                ),
+              ).then((_) {
+                if (mounted) setState(() => _isCallingPartner = false);
+              });
+            },
+            child: const Text('Accept'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _callPartner(Map<String, dynamic> user) {
     if (!SocketService.instance.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not connected to live service.')));
@@ -147,7 +181,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    SocketService.instance.callPartner(partnerId);
+    final myName = ApiService.currentUser?['name']?.toString() ?? '';
+    SocketService.instance.callPartner(partnerId, callerName: myName);
     setState(() {
       _isCallingPartner = true;
     });

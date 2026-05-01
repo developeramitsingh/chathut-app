@@ -8,7 +8,9 @@ class ApiService {
       return 'http://localhost:3000';
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:3000';
+      // Use Mac's LAN IP so a real Android device on the same WiFi can reach the backend.
+      // (Emulators use 10.0.2.2, but real devices need the host machine's actual IP.)
+      return 'http://192.168.1.16:3000';
     }
     return 'http://localhost:3000';
   }

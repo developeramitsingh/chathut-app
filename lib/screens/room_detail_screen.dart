@@ -44,6 +44,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   bool _remoteDescSet = false;
   String? _connectedPartnerId;
   final List<RTCIceCandidate> _pendingCandidates = [];
+  Timer? _autoConnectRetryTimer;
 
   // ── Seat timer (co-speaker) ───────────────────────────────────────────────
   Timer? _seatTimer;
@@ -64,6 +65,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   @override
   void dispose() {
     _seatTimer?.cancel();
+    _autoConnectRetryTimer?.cancel();
     _roomUpdateSub?.cancel();
     _incomingCallSub?.cancel();
     _callAcceptedSub?.cancel();
@@ -259,6 +261,12 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   void _attemptAutoConnect() {
     if (_audioConnected || _audioConnecting) return;
     if (_isNormalSpeaker && _hasFemaleSpeaker) {
+      if (!SocketService.instance.isConnected) {
+        // Socket not ready yet – retry in 2 seconds
+        _autoConnectRetryTimer?.cancel();
+        _autoConnectRetryTimer = Timer(const Duration(seconds: 2), _attemptAutoConnect);
+        return;
+      }
       _initiateCall(
         targetId: _room['femaleSpeakerId']!.toString(),
         targetName: _room['femaleSpeaker'] as String? ?? 'Partner',
@@ -279,7 +287,18 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     print('[LiveRoom] initiating call → $targetId');
     if (!mounted) return;
     setState(() { _audioConnecting = true; _isCaller = true; _connectedPartnerId = targetId; });
-    await _setupPeerConnection();
+    try {
+      await _setupPeerConnection();
+    } catch (e) {
+      print('[LiveRoom] _setupPeerConnection error: $e');
+      if (mounted) {
+        setState(() { _audioConnecting = false; _isCaller = false; _connectedPartnerId = null; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Mic error: $e')),
+        );
+      }
+      return;
+    }
     if (!mounted) return;
     SocketService.instance.callPartner(targetId);
     // Drain cached callAccepted
@@ -297,12 +316,23 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     final callerName = event['callerName']?.toString() ?? 'Caller';
     if (callerId == null || _audioConnected || _audioConnecting) return;
     // Only female speaker auto-accepts (co-speaker is the one calling)
-    if (!_isFemaleSpeaker && !_isHost) return;
+    if (!_isFemaleSpeaker) return;
     print('[LiveRoom] auto-accepting from $callerId ($callerName)');
     if (!mounted) return;
     setState(() { _audioConnecting = true; _isCaller = false; _connectedPartnerId = callerId; });
     SocketService.instance.acceptCall(callerId);
-    await _setupPeerConnection();
+    try {
+      await _setupPeerConnection();
+    } catch (e) {
+      print('[LiveRoom] _setupPeerConnection error on accept: $e');
+      if (mounted) {
+        setState(() { _audioConnecting = false; _connectedPartnerId = null; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Mic error: $e')),
+        );
+      }
+      return;
+    }
     if (!mounted) return;
     // Drain cached offer
     final cached = SocketService.instance.getLastOffer(callerId);
@@ -355,13 +385,19 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       ],
       'sdpSemantics': 'unified-plan',
     };
-    _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+    // getUserMedia may throw if permission is denied or no mic is available.
+    try {
+      _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+    } catch (e) {
+      throw Exception('Microphone access denied or unavailable: $e');
+    }
     _pc = await createPeerConnection(config);
     for (final track in _localStream!.getTracks()) {
       await _pc!.addTrack(track, _localStream!);
     }
     _pc!.onIceCandidate = (c) {
       if (c.candidate == null || c.candidate!.isEmpty || _connectedPartnerId == null) return;
+      print('[LiveRoom] ICE candidate → $_connectedPartnerId: ${c.candidate}');
       SocketService.instance.sendCandidate(_connectedPartnerId!, {
         'candidate': c.candidate,
         'sdpMid': c.sdpMid,
@@ -369,12 +405,19 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       });
     };
     _pc!.onTrack = (event) {
-      if (event.streams.isNotEmpty) {
-        _remoteRenderer.srcObject = event.streams[0];
+      print('[LiveRoom] onTrack: ${event.track.kind}, streams=${event.streams.length}');
+      final stream = event.streams.isNotEmpty ? event.streams[0] : null;
+      if (stream != null) {
+        _remoteRenderer.srcObject = stream;
+        _remoteRenderer.muted = false;
         if (mounted) setState(() { _audioConnected = true; _audioConnecting = false; });
+      } else {
+        // Fallback: no stream in event but track arrived – mark connected when ICE completes
+        print('[LiveRoom] onTrack: no streams in event, will rely on ICE state');
       }
     };
     _pc!.onConnectionState = (state) {
+      print('[LiveRoom] connectionState: $state');
       if (!mounted) return;
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         setState(() { _audioConnected = true; _audioConnecting = false; });
@@ -384,6 +427,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       }
     };
     _pc!.onIceConnectionState = (state) {
+      print('[LiveRoom] iceConnectionState: $state');
       if (!mounted) return;
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
@@ -461,6 +505,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     if (notify && _connectedPartnerId != null) {
       SocketService.instance.endCall(_connectedPartnerId!);
     }
+    _autoConnectRetryTimer?.cancel();
+    _autoConnectRetryTimer = null;
     _localStream?.dispose();
     _localStream = null;
     _remoteRenderer.srcObject = null;

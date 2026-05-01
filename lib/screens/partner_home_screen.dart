@@ -15,7 +15,6 @@ class PartnerHomeScreen extends StatefulWidget {
 
 class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   StreamSubscription<Map<String, dynamic>>? _incomingCallSubscription;
-  StreamSubscription<Map<String, dynamic>>? _callAcceptedSubscription;
   StreamSubscription<void>? _callEndedSubscription;
   bool _isOnCall = false;
   String? _incomingCallerName;
@@ -28,19 +27,14 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   void initState() {
     super.initState();
     _incomingCallSubscription = SocketService.instance.incomingCallStream.listen((data) {
-      if (_isOnCall) return;
+      // Don't intercept when inside a room — RoomDetailScreen handles this
+      if (_isOnCall || !mounted) return;
+      final route = ModalRoute.of(context);
+      if (route == null || !route.isCurrent) return;
       setState(() {
         _incomingCallerName = data['callerName'] as String? ?? 'Caller';
         _incomingCallerId = data['callerId'] as String?;
       });
-    });
-
-    _callAcceptedSubscription = SocketService.instance.callAcceptedStream.listen((data) {
-      if (_isOnCall) return;
-      final partnerId = data['callerId'] as String? ?? '';
-      final partnerName = data['callerName'] as String? ?? 'Caller';
-      if (!mounted) return;
-      _openCallScreen(partnerId: partnerId, partnerName: partnerName, isCaller: false);
     });
 
     _callEndedSubscription = SocketService.instance.callEndedStream.listen((_) {
@@ -61,7 +55,6 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   @override
   void dispose() {
     _incomingCallSubscription?.cancel();
-    _callAcceptedSubscription?.cancel();
     _callEndedSubscription?.cancel();
     super.dispose();
   }

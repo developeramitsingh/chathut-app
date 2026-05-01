@@ -193,9 +193,9 @@ class SocketService {
     }
   }
 
-  void callPartner(String partnerId) {
-    print('[SocketService] emit callPartner -> $partnerId');
-    _socket?.emit('callPartner', {'targetId': partnerId});
+  void callPartner(String partnerId, {String callerName = ''}) {
+    print('[SocketService] emit callPartner -> $partnerId callerName=$callerName');
+    _socket?.emit('callPartner', {'targetId': partnerId, 'callerName': callerName});
   }
 
   void acceptCall(String callerId) {
