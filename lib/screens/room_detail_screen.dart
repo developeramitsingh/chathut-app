@@ -7,7 +7,7 @@ import '../services/api_service.dart';
 import '../services/socket_service.dart';
 
 /// Maximum seconds a co-speaker can hold the seat before auto-rotation.
-const int _kSeatSeconds = 300; // 5 minutes
+const int _kSeatSeconds = 60; // 1 minute
 
 class RoomDetailScreen extends StatefulWidget {
   final Map<String, dynamic> room;
@@ -553,7 +553,13 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     if (expectedCallerId != null &&
         expectedCallerId.isNotEmpty &&
         callerId != expectedCallerId) {
-      return;
+      await _refreshRoom();
+      final refreshedExpectedCallerId = _room['otherSpeakerId']?.toString();
+      if (refreshedExpectedCallerId != null &&
+          refreshedExpectedCallerId.isNotEmpty &&
+          callerId != refreshedExpectedCallerId) {
+        return;
+      }
     }
 
     print('[LiveRoom] auto-accepting from $callerId ($callerName)');
@@ -1228,7 +1234,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                         ),
                       ),
                       Text(
-                        '~${(idx + 1) * 5} min',
+                        '~${idx + 1} min',
                         style: const TextStyle(
                           color: Colors.white38,
                           fontSize: 12,
@@ -1363,7 +1369,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Queue position #$_queuePosition  (~${_queuePosition * 5} min wait)',
+                    'Queue position #$_queuePosition  (~$_queuePosition min wait)',
                     style: const TextStyle(color: Colors.white70),
                   ),
                 ),
