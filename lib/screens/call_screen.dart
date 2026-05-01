@@ -31,6 +31,7 @@ class _CallScreenState extends State<CallScreen> {
   StreamSubscription<Map<String, dynamic>>? _candidateSub;
   StreamSubscription<Map<String, dynamic>>? _callCoinsSettledSub;
   StreamSubscription<Map<String, dynamic>>? _callEarningsCreditedSub;
+  StreamSubscription<Map<String, dynamic>>? _lowCoinsWarningSub;
 
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -51,6 +52,38 @@ class _CallScreenState extends State<CallScreen> {
   Timer? _callTimer;
   final List<RTCIceCandidate> _pendingCandidates = [];
 
+  Future<void> _showPopup({required String title, required String message}) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF151A42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF5AA2),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -67,12 +100,12 @@ class _CallScreenState extends State<CallScreen> {
       if (mounted) Navigator.of(context).pop();
     });
 
-    _callFailedSub = SocketService.instance.callFailedStream.listen((reason) {
+    _callFailedSub = SocketService.instance.callFailedStream.listen((
+      reason,
+    ) async {
       if (!mounted) return;
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(reason), backgroundColor: Colors.redAccent),
-      );
+      await _showPopup(title: 'Call Alert', message: reason);
+      if (mounted) Navigator.of(context).pop();
     });
 
     _callAcceptedSub = SocketService.instance.callAcceptedStream.listen((
@@ -117,7 +150,6 @@ class _CallScreenState extends State<CallScreen> {
     ) {
       final walletRaw = event['walletBalance'];
       final chargedRaw = event['chargedCoins'];
-      final chargedDeltaRaw = event['chargedCoinsDelta'];
       final minutesRaw = event['minutes'];
       final wallet = walletRaw is int
           ? walletRaw
@@ -125,9 +157,6 @@ class _CallScreenState extends State<CallScreen> {
       final charged = chargedRaw is int
           ? chargedRaw
           : int.tryParse(chargedRaw?.toString() ?? '0') ?? 0;
-      final chargedDelta = chargedDeltaRaw is int
-          ? chargedDeltaRaw
-          : int.tryParse(chargedDeltaRaw?.toString() ?? '0') ?? charged;
       final minutes = minutesRaw is int
           ? minutesRaw
           : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
@@ -137,15 +166,21 @@ class _CallScreenState extends State<CallScreen> {
         _chargedCoins = charged;
         _settledMinutes = minutes;
       });
-      if (chargedDelta > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Charged $chargedDelta coin(s). Total charged: $charged. Balance: $wallet',
-            ),
-          ),
-        );
-      }
+    });
+
+    _lowCoinsWarningSub = SocketService.instance.lowCoinsWarningStream.listen((
+      event,
+    ) {
+      final message = event['message']?.toString() ??
+          'Coins are insufficient to continue the call. Please add coins.';
+      final graceRaw = event['graceSeconds'];
+      final graceSeconds = graceRaw is int
+          ? graceRaw
+          : int.tryParse(graceRaw?.toString() ?? '0') ?? 10;
+      _showPopup(
+        title: 'Low Coins Warning',
+        message: '$message\n\nThis call will end in $graceSeconds seconds.',
+      );
     });
 
     _callEarningsCreditedSub = SocketService.instance.callEarningsCreditedStream
@@ -153,7 +188,6 @@ class _CallScreenState extends State<CallScreen> {
           if (!_showEarnedStats) return;
           final walletRaw = event['walletBalance'];
           final creditedRaw = event['creditedCoins'];
-          final creditedDeltaRaw = event['creditedCoinsDelta'];
           final minutesRaw = event['minutes'];
           final wallet = walletRaw is int
               ? walletRaw
@@ -161,9 +195,6 @@ class _CallScreenState extends State<CallScreen> {
           final credited = creditedRaw is int
               ? creditedRaw
               : int.tryParse(creditedRaw?.toString() ?? '0') ?? 0;
-          final creditedDelta = creditedDeltaRaw is int
-              ? creditedDeltaRaw
-              : int.tryParse(creditedDeltaRaw?.toString() ?? '0') ?? credited;
           final minutes = minutesRaw is int
               ? minutesRaw
               : int.tryParse(minutesRaw?.toString() ?? '0') ?? 0;
@@ -173,16 +204,6 @@ class _CallScreenState extends State<CallScreen> {
             _earnedCoins = credited;
             _settledMinutes = minutes;
           });
-          if (creditedDelta > 0) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Earned $creditedDelta coin(s). Total earned: $credited. Balance: $wallet',
-                ),
-                backgroundColor: const Color(0xFF1E7F3A),
-              ),
-            );
-          }
         });
   }
 
@@ -201,11 +222,9 @@ class _CallScreenState extends State<CallScreen> {
     } catch (e) {
       print('[CallScreen] getUserMedia error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Microphone access denied: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
+        _showPopup(
+          title: 'Microphone Access',
+          message: 'Microphone access denied: $e',
         );
         Navigator.of(context).pop();
       }
@@ -403,6 +422,7 @@ class _CallScreenState extends State<CallScreen> {
     _candidateSub?.cancel();
     _callCoinsSettledSub?.cancel();
     _callEarningsCreditedSub?.cancel();
+    _lowCoinsWarningSub?.cancel();
     _localStream?.dispose();
     _remoteRenderer.srcObject = null;
     _remoteRenderer.dispose();

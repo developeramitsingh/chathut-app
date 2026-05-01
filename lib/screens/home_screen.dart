@@ -39,6 +39,38 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<String>? _callFailedSubscription;
   StreamSubscription<Map<String, dynamic>>? _callCoinsSettledSubscription;
 
+  Future<void> _showPopup({required String title, required String message}) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF151A42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF5AA2),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
@@ -92,9 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
       reason,
     ) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(reason), backgroundColor: Colors.redAccent),
-      );
+      _showPopup(title: 'Call Alert', message: reason);
       _isCallingPartner = false;
     });
 
@@ -236,19 +266,13 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _walletBalance = updated;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Deposited $coins coins. Balance: $_walletBalance'),
-        ),
+      _showPopup(
+        title: 'Deposit Successful',
+        message: 'Deposited $coins coins. Balance: $_walletBalance',
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString()),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      _showPopup(title: 'Deposit Failed', message: e.toString());
     }
   }
 
@@ -310,9 +334,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _callPartner(Map<String, dynamic> user) async {
+    if (_walletBalance <= 0) {
+      _showPopup(
+        title: 'Insufficient Coins',
+        message: 'Please deposit coins before calling.',
+      );
+      return;
+    }
+
     if (!SocketService.instance.isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Not connected to live service.')),
+      _showPopup(
+        title: 'Connection Issue',
+        message: 'Not connected to live service.',
       );
       return;
     }
@@ -320,9 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final partnerId = user['id']?.toString();
     final name = user['name']?.toString() ?? 'Partner';
     if (partnerId == null || partnerId.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Unable to call partner')));
+      _showPopup(title: 'Call Failed', message: 'Unable to call partner.');
       return;
     }
 

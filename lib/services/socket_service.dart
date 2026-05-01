@@ -21,6 +21,7 @@ class SocketService {
   final _roomUpdateController = StreamController<Map<String, dynamic>>.broadcast();
   final _callCoinsSettledController = StreamController<Map<String, dynamic>>.broadcast();
   final _callEarningsCreditedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _lowCoinsWarningController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<List<Map<String, dynamic>>> get liveUsersStream => _liveUsersController.stream;
   Stream<Map<String, dynamic>> get incomingCallStream => _incomingCallController.stream;
@@ -33,6 +34,7 @@ class SocketService {
   Stream<Map<String, dynamic>> get roomUpdateStream => _roomUpdateController.stream;
   Stream<Map<String, dynamic>> get callCoinsSettledStream => _callCoinsSettledController.stream;
   Stream<Map<String, dynamic>> get callEarningsCreditedStream => _callEarningsCreditedController.stream;
+  Stream<Map<String, dynamic>> get lowCoinsWarningStream => _lowCoinsWarningController.stream;
 
   bool get isConnected => _socket?.connected == true;
 
@@ -188,6 +190,13 @@ class SocketService {
       }
     });
 
+    _socket!.on('lowCoinsWarning', (data) {
+      if (data is Map) {
+        final event = Map<String, dynamic>.from(data.cast<String, dynamic>());
+        _lowCoinsWarningController.add(event);
+      }
+    });
+
     _socket!.on('disconnect', (_) {
       _liveUsersController.add([]);
     });
@@ -294,6 +303,7 @@ class SocketService {
     _roomUpdateController.close();
     _callCoinsSettledController.close();
     _callEarningsCreditedController.close();
+    _lowCoinsWarningController.close();
     disconnect();
   }
 }

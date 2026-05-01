@@ -32,6 +32,38 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
   StreamSubscription<Map<String, dynamic>>? _callCoinsSettledSubscription;
   StreamSubscription<Map<String, dynamic>>? _callEarningsCreditedSubscription;
 
+  Future<void> _showPopup({required String title, required String message}) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF151A42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF5AA2),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -240,15 +272,14 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
       await ApiService.requestJoinRoom(roomId: roomId, role: 'femaleSpeaker');
       await _loadRooms();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Join request sent to host')),
+        _showPopup(
+          title: 'Request Sent',
+          message: 'Join request sent to host.',
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
+        _showPopup(title: 'Request Failed', message: e.toString());
       }
     }
   }
