@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import 'audio_room_screen.dart';
+import 'call_history_screen.dart';
 import 'call_screen.dart';
 import 'chat_room_screen.dart';
-import 'gaming_room_screen.dart';
 import 'login_screen.dart';
 import 'gifting_screen.dart';
 
@@ -29,7 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   static const List<String> _titles = <String>[
     'Live Connect',
-    'Gaming',
+    'History',
     'Chat',
     'Gifts',
   ];
@@ -53,7 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case 0:
         return const AudioRoomScreen(nested: true);
       case 1:
-        return const GamingRoomScreen(nested: true);
+        return const CallHistoryScreen(nested: true);
       case 2:
         return const ChatRoomScreen(nested: true);
       case 3:
@@ -644,8 +644,8 @@ class _HomeScreenState extends State<HomeScreen> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.mic), label: 'Live'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.videogame_asset),
-            label: 'Gaming',
+            icon: Icon(Icons.history),
+            label: 'History',
           ),
           BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Chat'),
           BottomNavigationBarItem(

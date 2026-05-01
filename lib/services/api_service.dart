@@ -208,6 +208,22 @@ class ApiService {
     return parsed;
   }
 
+  static Future<List<Map<String, dynamic>>> getCallHistory() async {
+    final uri = Uri.parse('$baseUrl/users/call-history');
+    final response = await http.get(uri, headers: headers);
+    final body = _decodeJsonList(response.body);
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Unable to load call history (status ${response.statusCode})',
+      );
+    }
+
+    return body
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row.cast<String, dynamic>()))
+        .toList();
+  }
+
   static Map<String, int> _parseWalletSummary(Map<String, dynamic> body) {
     final walletBalanceRaw = body['walletBalance'];
     final totalEarningsRaw = body['totalEarnings'];

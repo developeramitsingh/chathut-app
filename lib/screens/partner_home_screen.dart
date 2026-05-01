@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
+import 'call_history_screen.dart';
 import 'call_screen.dart';
 import 'login_screen.dart';
 import 'room_detail_screen.dart';
@@ -299,297 +300,323 @@ class _PartnerHomeScreenState extends State<PartnerHomeScreen> {
           IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
+      body: DefaultTabController(
+        length: 2,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Welcome, ${user?['name'] ?? 'Partner'}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+            const TabBar(
+              tabs: [
+                Tab(text: 'Dashboard'),
+                Tab(text: 'History'),
+              ],
             ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A1E45),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white10),
-              ),
-              child: Row(
+            Expanded(
+              child: TabBarView(
                 children: [
-                  const Icon(
-                    Icons.account_balance_wallet,
-                    color: Colors.amberAccent,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Wallet: $_walletBalance coins',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Welcome, ${user?['name'] ?? 'Partner'}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A1E45),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.white10),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.account_balance_wallet,
+                                color: Colors.amberAccent,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Wallet: $_walletBalance coins',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                'Earnings: $_totalEarnings',
+                                style: const TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (_hasLastCallSummary) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF161A3F),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.white10),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Last call: $_lastCallMinutes min',
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  'Charged: $_lastCallChargedCoins',
+                                  style: const TextStyle(
+                                    color: Colors.orangeAccent,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(
+                                  'Earned: $_lastCallEarnedCoins',
+                                  style: const TextStyle(
+                                    color: Colors.greenAccent,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        const Text(
+                          'You are now available to accept incoming calls from users.',
+                          style: TextStyle(color: Colors.white70, fontSize: 16),
+                        ),
+                        const SizedBox(height: 24),
+                        if (_incomingCallerName != null)
+                          Container(
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E1B3E),
+                              borderRadius: BorderRadius.circular(22),
+                              border: Border.all(color: const Color(0xFFFF5AA2)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Incoming call',
+                                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _incomingCallerName ?? 'Caller',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        onPressed: _acceptCall,
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFFFF5AA2),
+                                          padding: const EdgeInsets.symmetric(vertical: 16),
+                                        ),
+                                        child: const Text('Accept Call'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: _rejectCall,
+                                        style: OutlinedButton.styleFrom(
+                                          side: const BorderSide(color: Color(0xFFFF5AA2)),
+                                          padding: const EdgeInsets.symmetric(vertical: 16),
+                                        ),
+                                        child: const Text(
+                                          'Reject',
+                                          style: TextStyle(color: Color(0xFFFF5AA2)),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (_incomingCallerName == null)
+                          const Text(
+                            'Waiting for user calls…',
+                            style: TextStyle(color: Colors.white54, fontSize: 16),
+                          ),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'Available Rooms',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (_roomsLoading)
+                          const Center(child: CircularProgressIndicator())
+                        else if (_roomsError != null)
+                          Text(
+                            _roomsError!,
+                            style: const TextStyle(color: Colors.redAccent),
+                          )
+                        else if (_rooms.isEmpty)
+                          const Text(
+                            'No active rooms at the moment.',
+                            style: TextStyle(color: Colors.white54),
+                          )
+                        else
+                          Expanded(
+                            child: ListView.builder(
+                              padding: const EdgeInsets.only(top: 12),
+                              itemCount: _rooms.length,
+                              itemBuilder: (context, index) {
+                                final room = _rooms[index];
+                                final roomName = room['name'] as String? ?? 'Live Room';
+                                final hostName = room['hostName'] as String? ?? 'Host';
+                                final femaleSpeaker = room['femaleSpeaker'] as String?;
+                                final otherSpeaker = room['otherSpeaker'] as String?;
+                                final currentName = user?['name']?.toString() ?? '';
+                                final isOwnPartnerSeat = femaleSpeaker == currentName;
+                                final canJoinPartner = femaleSpeaker == null;
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 14),
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1B1A3D),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.white10),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        roomName,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        'Host: $hostName',
+                                        style: const TextStyle(
+                                          color: Colors.white60,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Partner seat: ${femaleSpeaker ?? 'Open'}',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Speaker seat: ${otherSpeaker ?? 'Open'}',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: ElevatedButton(
+                                              onPressed: isOwnPartnerSeat || !canJoinPartner
+                                                  ? null
+                                                  : () => _joinPartnerSeat(
+                                                      room['_id']?.toString() ??
+                                                          room['id'].toString(),
+                                                    ),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: const Color(0xFFFF5AA2),
+                                                padding: const EdgeInsets.symmetric(
+                                                  vertical: 14,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                isOwnPartnerSeat
+                                                    ? 'You are partner'
+                                                    : (canJoinPartner
+                                                          ? 'Join as Partner'
+                                                          : 'Partner taken'),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: OutlinedButton(
+                                              onPressed: () {
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (context) =>
+                                                        RoomDetailScreen(room: room),
+                                                  ),
+                                                );
+                                              },
+                                              style: OutlinedButton.styleFrom(
+                                                side: const BorderSide(
+                                                  color: Color(0xFFFF5AA2),
+                                                ),
+                                                padding: const EdgeInsets.symmetric(
+                                                  vertical: 14,
+                                                ),
+                                              ),
+                                              child: const Text(
+                                                'View',
+                                                style: TextStyle(color: Color(0xFFFF5AA2)),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                  Text(
-                    'Earnings: $_totalEarnings',
-                    style: const TextStyle(
-                      color: Colors.greenAccent,
-                      fontWeight: FontWeight.w600,
+                  const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: CallHistoryScreen(
+                      nested: true,
+                      showEarnings: true,
                     ),
                   ),
                 ],
               ),
             ),
-            if (_hasLastCallSummary) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF161A3F),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white10),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Last call: $_lastCallMinutes min',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      'Charged: $_lastCallChargedCoins',
-                      style: const TextStyle(
-                        color: Colors.orangeAccent,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    Text(
-                      'Earned: $_lastCallEarnedCoins',
-                      style: const TextStyle(
-                        color: Colors.greenAccent,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            const Text(
-              'You are now available to accept incoming calls from users.',
-              style: TextStyle(color: Colors.white70, fontSize: 16),
-            ),
-            const SizedBox(height: 24),
-            if (_incomingCallerName != null)
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1B3E),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: const Color(0xFFFF5AA2)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Incoming call',
-                      style: TextStyle(color: Colors.white70, fontSize: 16),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _incomingCallerName ?? 'Caller',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _acceptCall,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFFF5AA2),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                            ),
-                            child: const Text('Accept Call'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _rejectCall,
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Color(0xFFFF5AA2)),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                            ),
-                            child: const Text(
-                              'Reject',
-                              style: TextStyle(color: Color(0xFFFF5AA2)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            if (_incomingCallerName == null)
-              const Text(
-                'Waiting for user calls…',
-                style: TextStyle(color: Colors.white54, fontSize: 16),
-              ),
-            const SizedBox(height: 24),
-            const Text(
-              'Available Rooms',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (_roomsLoading)
-              const Center(child: CircularProgressIndicator())
-            else if (_roomsError != null)
-              Text(
-                _roomsError!,
-                style: const TextStyle(color: Colors.redAccent),
-              )
-            else if (_rooms.isEmpty)
-              const Text(
-                'No active rooms at the moment.',
-                style: TextStyle(color: Colors.white54),
-              )
-            else
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.only(top: 12),
-                  itemCount: _rooms.length,
-                  itemBuilder: (context, index) {
-                    final room = _rooms[index];
-                    final roomName = room['name'] as String? ?? 'Live Room';
-                    final hostName = room['hostName'] as String? ?? 'Host';
-                    final femaleSpeaker = room['femaleSpeaker'] as String?;
-                    final otherSpeaker = room['otherSpeaker'] as String?;
-                    final currentName = user?['name']?.toString() ?? '';
-                    final isOwnPartnerSeat = femaleSpeaker == currentName;
-                    final canJoinPartner = femaleSpeaker == null;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 14),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1B1A3D),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white10),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            roomName,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Host: $hostName',
-                            style: const TextStyle(
-                              color: Colors.white60,
-                              fontSize: 13,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Partner seat: ${femaleSpeaker ?? 'Open'}',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
-                            ),
-                          ),
-                          Text(
-                            'Speaker seat: ${otherSpeaker ?? 'Open'}',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: isOwnPartnerSeat || !canJoinPartner
-                                      ? null
-                                      : () => _joinPartnerSeat(
-                                          room['_id']?.toString() ??
-                                              room['id'].toString(),
-                                        ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFFFF5AA2),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    isOwnPartnerSeat
-                                        ? 'You are partner'
-                                        : (canJoinPartner
-                                              ? 'Join as Partner'
-                                              : 'Partner taken'),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) =>
-                                            RoomDetailScreen(room: room),
-                                      ),
-                                    );
-                                  },
-                                  style: OutlinedButton.styleFrom(
-                                    side: const BorderSide(
-                                      color: Color(0xFFFF5AA2),
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
-                                    ),
-                                  ),
-                                  child: const Text(
-                                    'View',
-                                    style: TextStyle(color: Color(0xFFFF5AA2)),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
           ],
         ),
       ),
