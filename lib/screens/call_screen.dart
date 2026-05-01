@@ -49,13 +49,16 @@ class _CallScreenState extends State<CallScreen> {
   int _chargedCoins = 0;
   int _earnedCoins = 0;
   bool _showEarnedStats = false;
+  bool _isPopupVisible = false;
   Timer? _callTimer;
   final List<RTCIceCandidate> _pendingCandidates = [];
 
   Future<void> _showPopup({required String title, required String message}) async {
     if (!mounted) return;
+    _isPopupVisible = true;
     await showDialog<void>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF151A42),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
@@ -82,6 +85,7 @@ class _CallScreenState extends State<CallScreen> {
         ],
       ),
     );
+    _isPopupVisible = false;
   }
 
   @override
@@ -97,7 +101,14 @@ class _CallScreenState extends State<CallScreen> {
     _showEarnedStats = role == 'partner' && gender == 'female';
 
     _callEndedSub = SocketService.instance.callEndedStream.listen((_) {
-      if (mounted) Navigator.of(context).pop();
+      if (!mounted) return;
+      if (_isPopupVisible) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _isPopupVisible = false;
+      }
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
     });
 
     _callFailedSub = SocketService.instance.callFailedStream.listen((
