@@ -513,7 +513,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       return;
     }
     if (!mounted) return;
-    SocketService.instance.callPartner(targetId);
+    SocketService.instance.callPartner(targetId, source: 'room');
     // Drain cached callAccepted
     final cached = SocketService.instance.getLastCallAccepted(targetId);
     if (cached != null && !_offerSent) {
@@ -569,7 +569,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       _isCaller = false;
       _connectedPartnerId = callerId;
     });
-    SocketService.instance.acceptCall(callerId);
+    SocketService.instance.acceptCall(callerId, source: 'room');
     try {
       await _setupPeerConnection();
     } catch (e) {
