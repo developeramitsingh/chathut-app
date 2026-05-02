@@ -45,6 +45,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   final Map<String, List<RTCIceCandidate>> _pendingCandidatesByPeer = {};
   bool _audioConnected = false;
   bool _audioConnecting = false;
+  bool _isSelfMuted = false;
   Timer? _autoConnectRetryTimer;
 
   // ── Seat timer (co-speaker) ───────────────────────────────────────────────
@@ -518,11 +519,32 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   }
 
   void _syncLocalAudioTrackState() {
-    final shouldEnableMic = _canBroadcastAudio;
+    final shouldEnableMic = _canBroadcastAudio && !_isSelfMuted;
     if (_localStream == null) return;
     for (final track in _localStream!.getAudioTracks()) {
       track.enabled = shouldEnableMic;
     }
+
+    for (final pc in _peerConnections.values) {
+      unawaited(
+        pc.getSenders().then((senders) {
+          for (final sender in senders) {
+            final senderTrack = sender.track;
+            if (senderTrack != null && senderTrack.kind == 'audio') {
+              senderTrack.enabled = shouldEnableMic;
+            }
+          }
+        }),
+      );
+    }
+  }
+
+  void _toggleSelfMute() {
+    if (!_isRoomActiveParticipant) return;
+    setState(() {
+      _isSelfMuted = !_isSelfMuted;
+    });
+    _syncLocalAudioTrackState();
   }
 
   void _updateAudioFlags() {
@@ -1008,6 +1030,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               accent: const Color(0xFFFF5AA2),
               icon: Icons.person,
               audioStatus: _isHost ? audioStatus : null,
+              showMicButton: _isHost,
+              isMuted: _isSelfMuted,
+              onMicTap: _toggleSelfMute,
             ),
 
             const SizedBox(height: 20),
@@ -1027,6 +1052,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                       audioStatus: femaleSpeakerName != null
                           ? audioStatus
                           : null,
+                      showMicButton: _isFemaleSpeaker,
+                      isMuted: _isSelfMuted,
+                      onMicTap: _toggleSelfMute,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1078,6 +1106,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                       audioStatus: otherSpeakerName != null
                           ? audioStatus
                           : null,
+                      showMicButton: _isNormalSpeaker,
+                      isMuted: _isSelfMuted,
+                      onMicTap: _toggleSelfMute,
                     ),
                   ),
                 ],
@@ -1555,6 +1586,9 @@ class _SpeakerTile extends StatelessWidget {
   final Color accent;
   final IconData icon;
   final _AudioStatus? audioStatus;
+  final bool showMicButton;
+  final bool isMuted;
+  final VoidCallback? onMicTap;
 
   const _SpeakerTile({
     required this.label,
@@ -1563,6 +1597,9 @@ class _SpeakerTile extends StatelessWidget {
     required this.accent,
     required this.icon,
     this.audioStatus,
+    this.showMicButton = false,
+    this.isMuted = false,
+    this.onMicTap,
   });
 
   @override
@@ -1625,6 +1662,31 @@ class _SpeakerTile extends StatelessWidget {
                 ),
             ],
           ),
+          if (showMicButton) ...[
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: onMicTap,
+              borderRadius: BorderRadius.circular(30),
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xCC0D1030),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isMuted ? Colors.redAccent : accent,
+                    width: 2,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  isMuted ? Icons.mic_off : Icons.mic,
+                  color: isMuted ? Colors.redAccent : accent,
+                  size: 22,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           Text(
             label,
