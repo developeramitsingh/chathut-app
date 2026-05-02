@@ -34,17 +34,17 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   StreamSubscription<void>? _callEndedSub;
 
   // ── WebRTC ────────────────────────────────────────────────────────────────
-  RTCPeerConnection? _pc;
   MediaStream? _localStream;
-  final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
+  final Map<String, RTCPeerConnection> _peerConnections = {};
+  final Map<String, RTCVideoRenderer> _remoteRenderers = {};
+  final Set<String> _connectingPeerIds = <String>{};
+  final Set<String> _connectedPeerIds = <String>{};
+  final Map<String, bool> _offerSentByPeer = {};
+  final Map<String, bool> _remoteDescSetByPeer = {};
+  final Map<String, bool> _remoteAnswerSetByPeer = {};
+  final Map<String, List<RTCIceCandidate>> _pendingCandidatesByPeer = {};
   bool _audioConnected = false;
   bool _audioConnecting = false;
-  bool _isCaller = false;
-  bool _offerSent = false;
-  bool _remoteDescSet = false;
-  bool _remoteAnswerSet = false;
-  String? _connectedPartnerId;
-  final List<RTCIceCandidate> _pendingCandidates = [];
   Timer? _autoConnectRetryTimer;
 
   // ── Seat timer (co-speaker) ───────────────────────────────────────────────
@@ -58,7 +58,6 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   void initState() {
     super.initState();
     _room = widget.room;
-    _remoteRenderer.initialize();
     _subscribeSocket();
     WidgetsBinding.instance.addPostFrameCallback((_) => _refreshRoom());
   }
@@ -77,7 +76,6 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     final id = _roomId;
     if (id != null) SocketService.instance.unsubscribeRoom(id);
     _teardownAudio(notify: false, updateUi: false);
-    _remoteRenderer.dispose();
     super.dispose();
   }
 
@@ -92,7 +90,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       _myId != null && _myId == _room['femaleSpeakerId']?.toString();
   bool get _isNormalSpeaker =>
       _myId != null && _myId == _room['otherSpeakerId']?.toString();
-  bool get _isSpeaker => _isHost || _isFemaleSpeaker || _isNormalSpeaker;
+  bool get _canBroadcastAudio =>
+      _isHost || _isFemaleSpeaker || _isNormalSpeaker;
+  bool get _isRoomActiveParticipant =>
+      _canBroadcastAudio || _isQueued || _isListenerParticipant;
 
   bool get _hasFemaleSpeaker {
     final id = _room['femaleSpeakerId']?.toString() ?? '';
@@ -185,7 +186,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       final prev = _room['otherSpeakerId']?.toString();
       setState(() => _room = updated);
       _checkSeatRotation(prev);
-      _attemptAutoConnect();
+      _syncLocalAudioTrackState();
+      _syncRoomAudioMesh();
     } catch (e) {
       if (mounted) setState(() => _message = e.toString());
     }
@@ -200,7 +202,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       if (!mounted) return;
       setState(() => _room = event);
       _checkSeatRotation(prev);
-      _attemptAutoConnect();
+      _syncLocalAudioTrackState();
+      _syncRoomAudioMesh();
     });
   }
 
@@ -224,8 +227,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       if (currentOtherSpeakerId != null &&
           currentOtherSpeakerId.isNotEmpty &&
           currentOtherSpeakerId != prevOtherSpeakerId &&
-          _connectedPartnerId == prevOtherSpeakerId) {
-        _teardownAudio(notify: true);
+          prevOtherSpeakerId != null &&
+          prevOtherSpeakerId.isNotEmpty) {
+        unawaited(_closePeerConnection(prevOtherSpeakerId, notify: false));
       }
     }
   }
@@ -247,8 +251,6 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   }
 
   Future<void> _rotateSeat() async {
-    if (_connectedPartnerId != null)
-      SocketService.instance.endCall(_connectedPartnerId!);
     await _leaveRoom();
   }
 
@@ -288,7 +290,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       _isLoading = true;
       _message = null;
     });
-    _teardownAudio(notify: true);
+    _teardownAudio(notify: false);
     try {
       await ApiService.leaveRoom(roomId: id);
       await _refreshRoom();
@@ -453,191 +455,134 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     }
   }
 
-  // ── WebRTC: auto-connect ──────────────────────────────────────────────────
+  // ── WebRTC: room mesh ─────────────────────────────────────────────────────
 
-  /// Rule: co-speaker (joiner) always initiates → calls female speaker.
-  /// Female speaker waits for incoming. Host stays as observer.
-  void _attemptAutoConnect() {
-    if (_audioConnected || _audioConnecting) return;
-    if (_isNormalSpeaker && _hasFemaleSpeaker) {
-      if (!SocketService.instance.isConnected) {
-        // Socket not ready yet – retry in 2 seconds
-        _autoConnectRetryTimer?.cancel();
-        _autoConnectRetryTimer = Timer(
-          const Duration(seconds: 2),
-          _attemptAutoConnect,
-        );
-        return;
-      }
-      _initiateCall(
-        targetId: _room['femaleSpeakerId']!.toString(),
-        targetName: _room['femaleSpeaker'] as String? ?? 'Partner',
-      );
+  Set<String> _activeRoomUserIds() {
+    final ids = <String>{};
+    void add(String? value) {
+      if (value != null && value.isNotEmpty) ids.add(value);
+    }
+
+    add(_room['hostId']?.toString());
+    add(_room['femaleSpeakerId']?.toString());
+    add(_room['otherSpeakerId']?.toString());
+
+    for (final entry in _participants) {
+      add(entry['userId']?.toString());
+    }
+    final queue = List<Map<String, dynamic>>.from(
+      _room['queue'] as List<dynamic>? ?? [],
+    );
+    for (final entry in queue) {
+      add(entry['userId']?.toString());
+    }
+    return ids;
+  }
+
+  Set<String> _currentTalkerIds() {
+    final ids = <String>{};
+    final hostId = _room['hostId']?.toString();
+    final partnerId = _room['femaleSpeakerId']?.toString();
+    final joinerId = _room['otherSpeakerId']?.toString();
+    if (hostId != null && hostId.isNotEmpty) ids.add(hostId);
+    if (partnerId != null && partnerId.isNotEmpty) ids.add(partnerId);
+    if (joinerId != null && joinerId.isNotEmpty) ids.add(joinerId);
+    return ids;
+  }
+
+  bool _shouldInitiateToPeer(String peerId) {
+    final me = _myId;
+    if (me == null) return false;
+    if (!_canBroadcastAudio) {
+      return true;
+    }
+    final talkers = _currentTalkerIds();
+    if (talkers.contains(peerId)) {
+      return me.compareTo(peerId) < 0;
+    }
+    return false;
+  }
+
+  Set<String> _desiredPeerIds() {
+    final me = _myId;
+    if (me == null || !_isRoomActiveParticipant) return <String>{};
+
+    final talkers = _currentTalkerIds();
+    final desired = <String>{};
+    if (_canBroadcastAudio) {
+      desired.addAll(talkers.where((id) => id != me));
+    } else {
+      desired.addAll(talkers.where((id) => id != me));
+    }
+    return desired;
+  }
+
+  void _syncLocalAudioTrackState() {
+    final shouldEnableMic = _canBroadcastAudio;
+    if (_localStream == null) return;
+    for (final track in _localStream!.getAudioTracks()) {
+      track.enabled = shouldEnableMic;
     }
   }
 
-  Future<void> _initiateCall({
-    required String targetId,
-    required String targetName,
-  }) async {
-    if (_audioConnected || _audioConnecting) return;
+  void _updateAudioFlags() {
+    if (!mounted) return;
+    setState(() {
+      _audioConnected = _connectedPeerIds.isNotEmpty;
+      _audioConnecting = _connectingPeerIds.isNotEmpty;
+    });
+  }
+
+  void _syncRoomAudioMesh() {
     if (!SocketService.instance.isConnected) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Not connected to live service.')),
-        );
-      }
+      _autoConnectRetryTimer?.cancel();
+      _autoConnectRetryTimer = Timer(
+        const Duration(seconds: 2),
+        _syncRoomAudioMesh,
+      );
       return;
     }
-    print('[LiveRoom] initiating call → $targetId');
-    if (!mounted) return;
-    setState(() {
-      _audioConnecting = true;
-      _isCaller = true;
-      _connectedPartnerId = targetId;
-    });
+
+    final desired = _desiredPeerIds();
+
+    for (final peerId in List<String>.from(_peerConnections.keys)) {
+      if (!desired.contains(peerId)) {
+        _closePeerConnection(peerId, notify: false);
+      }
+    }
+
+    for (final peerId in desired) {
+      if (_shouldInitiateToPeer(peerId)) {
+        unawaited(_initiatePeerConnection(peerId));
+      }
+    }
+
+    _updateAudioFlags();
+  }
+
+  Future<void> _ensureLocalStream() async {
+    if (_localStream != null) {
+      _syncLocalAudioTrackState();
+      return;
+    }
     try {
-      await _setupPeerConnection();
+      _localStream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': false,
+      });
+      _syncLocalAudioTrackState();
     } catch (e) {
-      print('[LiveRoom] _setupPeerConnection error: $e');
-      if (mounted) {
-        setState(() {
-          _audioConnecting = false;
-          _isCaller = false;
-          _connectedPartnerId = null;
-        });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Mic error: $e')));
-      }
-      return;
-    }
-    if (!mounted) return;
-    SocketService.instance.callPartner(targetId, source: 'room');
-    // Drain cached callAccepted
-    final cached = SocketService.instance.getLastCallAccepted(targetId);
-    if (cached != null && !_offerSent) {
-      final sent = await _sendOffer();
-      if (sent) {
-        SocketService.instance.clearLastCallAccepted();
-      }
-    }
-
-    // Drain cached answer that may arrive before listeners are fully ready
-    final cachedAnswer = SocketService.instance.getLastAnswer(targetId);
-    if (cachedAnswer != null && !_remoteAnswerSet) {
-      await _handleAnswer(cachedAnswer);
-      SocketService.instance.clearLastAnswer(targetId);
+      throw Exception('Microphone access denied or unavailable: $e');
     }
   }
 
-  // ── WebRTC: signaling ─────────────────────────────────────────────────────
-
-  void _onIncomingCall(Map<String, dynamic> event) async {
-    final callerId = event['callerId']?.toString();
-    final callerName = event['callerName']?.toString() ?? 'Caller';
-    if (callerId == null || _audioConnected || _audioConnecting) {
-      return;
+  Future<RTCPeerConnection> _createPeerConnectionFor(String peerId) async {
+    if (_peerConnections[peerId] != null) {
+      return _peerConnections[peerId]!;
     }
 
-    // Host approval can arrive to different clients with small timing differences.
-    // Re-sync room state before deciding whether this user is the active partner.
-    if (!_isFemaleSpeaker) {
-      await _refreshRoom();
-      if (!_isFemaleSpeaker) {
-        return;
-      }
-    }
+    await _ensureLocalStream();
 
-    final expectedCallerId = _room['otherSpeakerId']?.toString();
-    if (expectedCallerId != null &&
-        expectedCallerId.isNotEmpty &&
-        callerId != expectedCallerId) {
-      await _refreshRoom();
-      final refreshedExpectedCallerId = _room['otherSpeakerId']?.toString();
-      if (refreshedExpectedCallerId != null &&
-          refreshedExpectedCallerId.isNotEmpty &&
-          callerId != refreshedExpectedCallerId) {
-        return;
-      }
-    }
-
-    print('[LiveRoom] auto-accepting from $callerId ($callerName)');
-    if (!mounted) return;
-    setState(() {
-      _audioConnecting = true;
-      _isCaller = false;
-      _connectedPartnerId = callerId;
-    });
-    SocketService.instance.acceptCall(callerId, source: 'room');
-    try {
-      await _setupPeerConnection();
-    } catch (e) {
-      print('[LiveRoom] _setupPeerConnection error on accept: $e');
-      if (mounted) {
-        setState(() {
-          _audioConnecting = false;
-          _connectedPartnerId = null;
-        });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Mic error: $e')));
-      }
-      return;
-    }
-    if (!mounted) return;
-    // Drain cached offer
-    final cached = SocketService.instance.getLastOffer(callerId);
-    if (cached != null) {
-      final handled = await _handleOffer(cached);
-      if (handled) {
-        SocketService.instance.clearLastOffer(callerId);
-      }
-    }
-  }
-
-  void _onCallAccepted(Map<String, dynamic> event) async {
-    if (!_isCaller) return;
-    final acceptedBy = event['partnerId']?.toString();
-    if (acceptedBy != _connectedPartnerId) return;
-    print('[LiveRoom] callAccepted by $acceptedBy');
-    if (!mounted) return;
-    final sent = await _sendOffer();
-    if (sent) {
-      SocketService.instance.clearLastCallAccepted();
-    }
-  }
-
-  void _onOffer(Map<String, dynamic> data) async {
-    final fromId = data['from']?.toString();
-    if (_isCaller || fromId != _connectedPartnerId) return;
-    print('[LiveRoom] offer from $fromId');
-    final handled = await _handleOffer(data);
-    if (handled && fromId != null) {
-      SocketService.instance.clearLastOffer(fromId);
-    }
-  }
-
-  void _onAnswer(Map<String, dynamic> data) async {
-    if (!_isCaller) return;
-    await _handleAnswer(data);
-  }
-
-  void _onCandidate(Map<String, dynamic> data) async {
-    final fromId = data['from']?.toString();
-    if (fromId != null && fromId != _connectedPartnerId) return;
-    await _handleCandidate(data);
-  }
-
-  void _onCallEnded() {
-    print('[LiveRoom] callEnded');
-    _teardownAudio(notify: false);
-  }
-
-  // ── WebRTC: peer connection ───────────────────────────────────────────────
-
-  Future<void> _setupPeerConnection() async {
-    if (_pc != null) return;
     final config = {
       'iceServers': [
         {'urls': 'stun:stun.l.google.com:19302'},
@@ -645,135 +590,226 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       ],
       'sdpSemantics': 'unified-plan',
     };
-    // getUserMedia may throw if permission is denied or no mic is available.
-    try {
-      _localStream = await navigator.mediaDevices.getUserMedia({
-        'audio': true,
-        'video': false,
-      });
-    } catch (e) {
-      throw Exception('Microphone access denied or unavailable: $e');
-    }
-    _pc = await createPeerConnection(config);
+
+    final pc = await createPeerConnection(config);
     for (final track in _localStream!.getTracks()) {
-      await _pc!.addTrack(track, _localStream!);
+      await pc.addTrack(track, _localStream!);
     }
-    _pc!.onIceCandidate = (c) {
-      if (c.candidate == null ||
-          c.candidate!.isEmpty ||
-          _connectedPartnerId == null)
-        return;
-      print('[LiveRoom] ICE candidate → $_connectedPartnerId: ${c.candidate}');
-      SocketService.instance.sendCandidate(_connectedPartnerId!, {
-        'candidate': c.candidate,
-        'sdpMid': c.sdpMid,
-        'sdpMLineIndex': c.sdpMLineIndex,
+
+    final renderer = RTCVideoRenderer();
+    await renderer.initialize();
+    _remoteRenderers[peerId] = renderer;
+
+    pc.onIceCandidate = (candidate) {
+      if (candidate.candidate == null || candidate.candidate!.isEmpty) return;
+      SocketService.instance.sendCandidate(peerId, {
+        'candidate': candidate.candidate,
+        'sdpMid': candidate.sdpMid,
+        'sdpMLineIndex': candidate.sdpMLineIndex,
       });
     };
-    _pc!.onTrack = (event) {
-      print(
-        '[LiveRoom] onTrack: ${event.track.kind}, streams=${event.streams.length}',
-      );
+
+    pc.onTrack = (event) {
       final stream = event.streams.isNotEmpty ? event.streams[0] : null;
       if (stream != null) {
-        _remoteRenderer.srcObject = stream;
-        _remoteRenderer.muted = false;
-        if (mounted)
-          setState(() {
-            _audioConnected = true;
-            _audioConnecting = false;
-          });
-      } else {
-        // Fallback: no stream in event but track arrived – mark connected when ICE completes
-        print(
-          '[LiveRoom] onTrack: no streams in event, will rely on ICE state',
-        );
+        final peerRenderer = _remoteRenderers[peerId];
+        if (peerRenderer != null) {
+          peerRenderer.srcObject = stream;
+          peerRenderer.muted = false;
+        }
       }
+      _connectedPeerIds.add(peerId);
+      _connectingPeerIds.remove(peerId);
+      _updateAudioFlags();
     };
-    _pc!.onConnectionState = (state) {
-      print('[LiveRoom] connectionState: $state');
-      if (!mounted) return;
+
+    pc.onConnectionState = (state) {
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-        setState(() {
-          _audioConnected = true;
-          _audioConnecting = false;
-        });
+        _connectedPeerIds.add(peerId);
+        _connectingPeerIds.remove(peerId);
+        _updateAudioFlags();
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
-          state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
-        _teardownAudio(notify: false);
+          state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        _closePeerConnection(peerId, notify: false);
       }
     };
-    _pc!.onIceConnectionState = (state) {
-      print('[LiveRoom] iceConnectionState: $state');
-      if (!mounted) return;
-      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
-          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
-        setState(() {
-          _audioConnected = true;
-          _audioConnecting = false;
-        });
-      }
-    };
+
+    _peerConnections[peerId] = pc;
+    _offerSentByPeer[peerId] = false;
+    _remoteDescSetByPeer[peerId] = false;
+    _remoteAnswerSetByPeer[peerId] = false;
+    _pendingCandidatesByPeer[peerId] = <RTCIceCandidate>[];
+    return pc;
   }
 
-  Future<bool> _sendOffer() async {
-    if (_offerSent || _pc == null || _connectedPartnerId == null) return false;
-    _offerSent = true;
-    final offer = await _pc!.createOffer({'offerToReceiveAudio': true});
-    await _pc!.setLocalDescription(offer);
-    SocketService.instance.sendOffer(_connectedPartnerId!, offer.toMap());
+  Future<void> _initiatePeerConnection(String peerId) async {
+    if (_peerConnections.containsKey(peerId) ||
+        _connectingPeerIds.contains(peerId)) {
+      return;
+    }
+
+    _connectingPeerIds.add(peerId);
+    _updateAudioFlags();
+
+    try {
+      await _createPeerConnectionFor(peerId);
+      SocketService.instance.callPartner(peerId, source: 'room');
+
+      final cachedAccepted = SocketService.instance.getLastCallAccepted(peerId);
+      if (cachedAccepted != null) {
+        await _sendOfferToPeer(peerId);
+        SocketService.instance.clearLastCallAccepted();
+      }
+
+      final cachedAnswer = SocketService.instance.getLastAnswer(peerId);
+      if (cachedAnswer != null) {
+        await _handleAnswerForPeer(peerId, cachedAnswer);
+        SocketService.instance.clearLastAnswer(peerId);
+      }
+    } catch (e) {
+      _closePeerConnection(peerId, notify: false);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Audio setup error: $e')));
+      }
+    }
+  }
+
+  // ── WebRTC: signaling ─────────────────────────────────────────────────────
+
+  void _onIncomingCall(Map<String, dynamic> event) async {
+    final callerId = event['callerId']?.toString();
+    if (callerId == null || callerId.isEmpty) return;
+    if (!_isRoomActiveParticipant) return;
+
+    final activeRoomUsers = _activeRoomUserIds();
+    if (!activeRoomUsers.contains(callerId)) {
+      await _refreshRoom();
+      if (!_activeRoomUserIds().contains(callerId)) {
+        return;
+      }
+    }
+
+    try {
+      await _createPeerConnectionFor(callerId);
+      SocketService.instance.acceptCall(callerId, source: 'room');
+      final cachedOffer = SocketService.instance.getLastOffer(callerId);
+      if (cachedOffer != null) {
+        final handled = await _handleOfferFromPeer(callerId, cachedOffer);
+        if (handled) {
+          SocketService.instance.clearLastOffer(callerId);
+        }
+      }
+      _connectingPeerIds.add(callerId);
+      _updateAudioFlags();
+    } catch (_) {}
+  }
+
+  void _onCallAccepted(Map<String, dynamic> event) async {
+    final acceptedBy = event['partnerId']?.toString();
+    if (acceptedBy == null || acceptedBy.isEmpty) return;
+    if (!_peerConnections.containsKey(acceptedBy)) return;
+    await _sendOfferToPeer(acceptedBy);
+    SocketService.instance.clearLastCallAccepted();
+  }
+
+  void _onOffer(Map<String, dynamic> data) async {
+    final fromId = data['from']?.toString();
+    if (fromId == null || fromId.isEmpty) return;
+    if (!_activeRoomUserIds().contains(fromId)) return;
+    await _createPeerConnectionFor(fromId);
+    final handled = await _handleOfferFromPeer(fromId, data);
+    if (handled) {
+      SocketService.instance.clearLastOffer(fromId);
+    }
+  }
+
+  void _onAnswer(Map<String, dynamic> data) async {
+    final fromId = data['from']?.toString();
+    if (fromId == null || fromId.isEmpty) return;
+    await _handleAnswerForPeer(fromId, data);
+  }
+
+  void _onCandidate(Map<String, dynamic> data) async {
+    final fromId = data['from']?.toString();
+    if (fromId == null || fromId.isEmpty) return;
+    await _handleCandidateForPeer(fromId, data);
+  }
+
+  void _onCallEnded() {
+    _teardownAudio(notify: false);
+  }
+
+  Future<bool> _sendOfferToPeer(String peerId) async {
+    final pc = _peerConnections[peerId];
+    if (pc == null) return false;
+    if (_offerSentByPeer[peerId] == true) return false;
+
+    _offerSentByPeer[peerId] = true;
+    final offer = await pc.createOffer({'offerToReceiveAudio': true});
+    await pc.setLocalDescription(offer);
+    SocketService.instance.sendOffer(peerId, offer.toMap());
+    _connectingPeerIds.add(peerId);
+    _updateAudioFlags();
     return true;
   }
 
-  Future<bool> _handleOffer(Map<String, dynamic> data) async {
-    if (_pc == null) return false;
+  Future<bool> _handleOfferFromPeer(
+    String peerId,
+    Map<String, dynamic> data,
+  ) async {
+    final pc = _peerConnections[peerId];
+    if (pc == null) return false;
     final offerMap = data['offer'] as Map<String, dynamic>?;
     if (offerMap == null) return false;
-    await _pc!.setRemoteDescription(
+
+    await pc.setRemoteDescription(
       RTCSessionDescription(
         offerMap['sdp'] as String,
         offerMap['type'] as String,
       ),
     );
-    _remoteDescSet = true;
-    await _flushPendingCandidates();
-    final answer = await _pc!.createAnswer();
-    await _pc!.setLocalDescription(answer);
-    SocketService.instance.sendAnswer(
-      data['from']?.toString() ?? _connectedPartnerId!,
-      answer.toMap(),
-    );
-    if (mounted)
-      setState(() {
-        _audioConnected = true;
-        _audioConnecting = false;
-      });
+    _remoteDescSetByPeer[peerId] = true;
+    await _flushPendingCandidatesForPeer(peerId);
+
+    final answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    SocketService.instance.sendAnswer(peerId, answer.toMap());
+
+    _connectingPeerIds.add(peerId);
+    _updateAudioFlags();
     return true;
   }
 
-  Future<void> _handleAnswer(Map<String, dynamic> data) async {
-    if (_pc == null) return;
-    final fromId = data['from']?.toString();
-    if (fromId != null && fromId != _connectedPartnerId) return;
+  Future<void> _handleAnswerForPeer(
+    String peerId,
+    Map<String, dynamic> data,
+  ) async {
+    final pc = _peerConnections[peerId];
+    if (pc == null) return;
     final answerMap = data['answer'] as Map<String, dynamic>?;
     if (answerMap == null) return;
-    await _pc!.setRemoteDescription(
+
+    await pc.setRemoteDescription(
       RTCSessionDescription(
         answerMap['sdp'] as String,
         answerMap['type'] as String,
       ),
     );
-    _remoteAnswerSet = true;
-    _remoteDescSet = true;
-    await _flushPendingCandidates();
-    if (mounted)
-      setState(() {
-        _audioConnected = true;
-        _audioConnecting = false;
-      });
+    _remoteAnswerSetByPeer[peerId] = true;
+    _remoteDescSetByPeer[peerId] = true;
+    await _flushPendingCandidatesForPeer(peerId);
+
+    _connectingPeerIds.add(peerId);
+    _updateAudioFlags();
   }
 
-  Future<void> _handleCandidate(Map<String, dynamic> data) async {
+  Future<void> _handleCandidateForPeer(
+    String peerId,
+    Map<String, dynamic> data,
+  ) async {
     final raw = data['candidate'];
     String? candidateStr;
     String? sdpMid;
@@ -787,49 +823,85 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       candidateStr = raw;
     }
     if (candidateStr == null || candidateStr.isEmpty) return;
+
     final candidate = RTCIceCandidate(candidateStr, sdpMid, sdpMLineIndex);
-    if (!_remoteDescSet || _pc == null) {
-      _pendingCandidates.add(candidate);
+    final pc = _peerConnections[peerId];
+    if (pc == null || _remoteDescSetByPeer[peerId] != true) {
+      final pending = _pendingCandidatesByPeer.putIfAbsent(
+        peerId,
+        () => <RTCIceCandidate>[],
+      );
+      pending.add(candidate);
       return;
     }
-    await _pc!.addCandidate(candidate);
+
+    await pc.addCandidate(candidate);
   }
 
-  Future<void> _flushPendingCandidates() async {
-    if (_pc == null || _pendingCandidates.isEmpty) return;
-    for (final c in List<RTCIceCandidate>.from(_pendingCandidates)) {
-      await _pc!.addCandidate(c);
+  Future<void> _flushPendingCandidatesForPeer(String peerId) async {
+    final pc = _peerConnections[peerId];
+    final pending = _pendingCandidatesByPeer[peerId];
+    if (pc == null || pending == null || pending.isEmpty) return;
+    for (final candidate in List<RTCIceCandidate>.from(pending)) {
+      await pc.addCandidate(candidate);
     }
-    _pendingCandidates.clear();
+    pending.clear();
+  }
+
+  Future<void> _closePeerConnection(
+    String peerId, {
+    required bool notify,
+  }) async {
+    if (notify) {
+      SocketService.instance.endCall(peerId);
+    }
+
+    final renderer = _remoteRenderers.remove(peerId);
+    if (renderer != null) {
+      renderer.srcObject = null;
+      await renderer.dispose();
+    }
+
+    final pc = _peerConnections.remove(peerId);
+    await pc?.close();
+
+    _connectingPeerIds.remove(peerId);
+    _connectedPeerIds.remove(peerId);
+    _offerSentByPeer.remove(peerId);
+    _remoteDescSetByPeer.remove(peerId);
+    _remoteAnswerSetByPeer.remove(peerId);
+    _pendingCandidatesByPeer.remove(peerId);
+
+    SocketService.instance.clearLastOffer(peerId);
+    SocketService.instance.clearLastAnswer(peerId);
+    _updateAudioFlags();
   }
 
   void _teardownAudio({required bool notify, bool updateUi = true}) {
-    if (notify && _connectedPartnerId != null) {
-      SocketService.instance.endCall(_connectedPartnerId!);
-    }
     _autoConnectRetryTimer?.cancel();
     _autoConnectRetryTimer = null;
+
+    final peerIds = List<String>.from(_peerConnections.keys);
+    for (final peerId in peerIds) {
+      unawaited(_closePeerConnection(peerId, notify: notify));
+    }
+
     _localStream?.dispose();
     _localStream = null;
-    _remoteRenderer.srcObject = null;
-    _pc?.close();
-    _pc = null;
-    _offerSent = false;
-    _remoteDescSet = false;
-    _remoteAnswerSet = false;
-    _pendingCandidates.clear();
-    final prev = _connectedPartnerId;
-    _connectedPartnerId = null;
-    if (prev != null) {
-      SocketService.instance.clearLastOffer(prev);
-      SocketService.instance.clearLastCallAccepted();
-    }
-    if (updateUi && mounted)
+
+    _connectingPeerIds.clear();
+    _connectedPeerIds.clear();
+    _offerSentByPeer.clear();
+    _remoteDescSetByPeer.clear();
+    _remoteAnswerSetByPeer.clear();
+    _pendingCandidatesByPeer.clear();
+
+    if (updateUi && mounted) {
       setState(() {
         _audioConnected = false;
         _audioConnecting = false;
-        _isCaller = false;
       });
+    }
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -935,7 +1007,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               isMe: _isHost,
               accent: const Color(0xFFFF5AA2),
               icon: Icons.person,
-              audioStatus: null, // host is observer, no audio indicator
+              audioStatus: _isHost ? audioStatus : null,
             ),
 
             const SizedBox(height: 20),
@@ -1012,8 +1084,11 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               ),
             ),
 
-            // Hidden WebRTC audio renderer
-            SizedBox(width: 1, height: 1, child: RTCVideoView(_remoteRenderer)),
+            // Hidden WebRTC audio renderers (one per connected remote peer)
+            ..._remoteRenderers.values.map(
+              (renderer) =>
+                  SizedBox(width: 1, height: 1, child: RTCVideoView(renderer)),
+            ),
 
             // ── CO-SPEAKER seat timer ──────────────────────────────────────
             if (_isNormalSpeaker) ...[
@@ -1277,18 +1352,6 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Listener join
-        if (!_isHost && !_isSpeaker && !_isQueued && !_hasPendingRequest)
-          ElevatedButton.icon(
-            onPressed: () => _joinRoom('listener'),
-            icon: const Icon(Icons.headphones),
-            label: const Text('Request Listener Access'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF5E4FFF),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-          ),
-
         // Partner speaker join
         if (!_hasFemaleSpeaker &&
             _isPartner &&
