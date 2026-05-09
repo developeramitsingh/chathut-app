@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 
@@ -231,58 +232,77 @@ class _CallScreenState extends State<CallScreen> {
     print(
       '[CallScreen] init isCaller=${widget.isCaller} partner=${widget.partnerId}',
     );
-    await _remoteRenderer.initialize();
-    await _loadWalletBalance();
-
     try {
+      await _remoteRenderer.initialize();
+      await _loadWalletBalance();
+
+      final micGranted = await _ensureMicrophonePermission();
+      if (!micGranted) {
+        if (!mounted) return;
+        await _showPopup(
+          title: 'Microphone Permission Required',
+          message:
+              'Please allow microphone permission to join live call. You can enable it from App Settings.',
+        );
+        await _exitCallScreenOnce();
+        return;
+      }
+
       _localStream = await navigator.mediaDevices.getUserMedia({
         'audio': true,
         'video': false,
       });
-    } catch (e) {
-      print('[CallScreen] getUserMedia error: $e');
-      if (mounted) {
-        _showPopup(
-          title: 'Microphone Access',
-          message: 'Microphone access denied: $e',
+
+      _pc = await _buildPeerConnection();
+
+      // Drain cached events that arrived before _pc was ready
+      if (widget.isCaller) {
+        final accepted = SocketService.instance.getLastCallAccepted(
+          widget.partnerId,
         );
-        Navigator.of(context).pop();
-      }
-      return;
-    }
-    _pc = await _buildPeerConnection();
+        if (accepted != null && !_offerSent) {
+          print('[CallScreen] drain cached callAccepted');
+          final sent = await _sendOffer();
+          if (sent) {
+            SocketService.instance.clearLastCallAccepted();
+          }
+        }
 
-    // Drain cached events that arrived before _pc was ready
-    if (widget.isCaller) {
-      final accepted = SocketService.instance.getLastCallAccepted(
-        widget.partnerId,
-      );
-      if (accepted != null && !_offerSent) {
-        print('[CallScreen] drain cached callAccepted');
-        final sent = await _sendOffer();
-        if (sent) {
-          SocketService.instance.clearLastCallAccepted();
+        final cachedAnswer = SocketService.instance.getLastAnswer(
+          widget.partnerId,
+        );
+        if (cachedAnswer != null && !_remoteAnswerSet) {
+          print('[CallScreen] drain cached answer');
+          await _handleAnswer(cachedAnswer);
+          SocketService.instance.clearLastAnswer(widget.partnerId);
+        }
+      } else {
+        final cachedOffer = SocketService.instance.getLastOffer(widget.partnerId);
+        if (cachedOffer != null) {
+          print('[CallScreen] drain cached offer');
+          final handled = await _handleOffer(cachedOffer);
+          if (handled) {
+            SocketService.instance.clearLastOffer(widget.partnerId);
+          }
         }
       }
-
-      final cachedAnswer = SocketService.instance.getLastAnswer(
-        widget.partnerId,
+    } catch (e) {
+      print('[CallScreen] initWebRtc error: $e');
+      if (!mounted) return;
+      await _showPopup(
+        title: 'Call Failed',
+        message: 'Unable to start live call: $e',
       );
-      if (cachedAnswer != null && !_remoteAnswerSet) {
-        print('[CallScreen] drain cached answer');
-        await _handleAnswer(cachedAnswer);
-        SocketService.instance.clearLastAnswer(widget.partnerId);
-      }
-    } else {
-      final cachedOffer = SocketService.instance.getLastOffer(widget.partnerId);
-      if (cachedOffer != null) {
-        print('[CallScreen] drain cached offer');
-        final handled = await _handleOffer(cachedOffer);
-        if (handled) {
-          SocketService.instance.clearLastOffer(widget.partnerId);
-        }
-      }
+      await _exitCallScreenOnce();
     }
+  }
+
+  Future<bool> _ensureMicrophonePermission() async {
+    var status = await Permission.microphone.status;
+    if (status.isGranted) return true;
+
+    status = await Permission.microphone.request();
+    return status.isGranted;
   }
 
   Future<RTCPeerConnection> _buildPeerConnection() async {
