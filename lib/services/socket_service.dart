@@ -23,6 +23,7 @@ class SocketService {
   final _callEarningsCreditedController = StreamController<Map<String, dynamic>>.broadcast();
   final _lowCoinsWarningController = StreamController<Map<String, dynamic>>.broadcast();
   final _incomingDirectChatMessageController = StreamController<Map<String, dynamic>>.broadcast();
+  final _roomMuteUpdatedController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<List<Map<String, dynamic>>> get liveUsersStream => _liveUsersController.stream;
   Stream<Map<String, dynamic>> get incomingCallStream => _incomingCallController.stream;
@@ -38,6 +39,7 @@ class SocketService {
   Stream<Map<String, dynamic>> get lowCoinsWarningStream => _lowCoinsWarningController.stream;
   Stream<Map<String, dynamic>> get incomingDirectChatMessageStream =>
       _incomingDirectChatMessageController.stream;
+  Stream<Map<String, dynamic>> get roomMuteUpdatedStream => _roomMuteUpdatedController.stream;
 
   bool get isConnected => _socket?.connected == true;
 
@@ -207,6 +209,13 @@ class SocketService {
       }
     });
 
+    _socket!.on('roomMuteUpdated', (data) {
+      if (data is Map) {
+        final event = Map<String, dynamic>.from(data.cast<String, dynamic>());
+        _roomMuteUpdatedController.add(event);
+      }
+    });
+
     _socket!.on('disconnect', (_) {
       _liveUsersController.add([]);
     });
@@ -299,6 +308,18 @@ class SocketService {
     });
   }
 
+  void hostMuteRoomUser({
+    required String targetId,
+    required bool muted,
+    String? roomId,
+  }) {
+    _socket?.emit('hostMuteRoomUser', {
+      'targetId': targetId,
+      'muted': muted,
+      if (roomId != null) 'roomId': roomId,
+    });
+  }
+
   List<Map<String, dynamic>> _toUserList(dynamic data) {
     if (data is List) {
       return data.map<Map<String, dynamic>>((user) {
@@ -328,6 +349,7 @@ class SocketService {
     _callEarningsCreditedController.close();
     _lowCoinsWarningController.close();
     _incomingDirectChatMessageController.close();
+    _roomMuteUpdatedController.close();
     disconnect();
   }
 }

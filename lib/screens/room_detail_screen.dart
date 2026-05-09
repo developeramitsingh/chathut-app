@@ -31,6 +31,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   StreamSubscription<Map<String, dynamic>>? _offerSub;
   StreamSubscription<Map<String, dynamic>>? _answerSub;
   StreamSubscription<Map<String, dynamic>>? _candidateSub;
+  StreamSubscription<Map<String, dynamic>>? _roomMuteUpdatedSub;
   StreamSubscription<void>? _callEndedSub;
 
   // ── WebRTC ────────────────────────────────────────────────────────────────
@@ -46,6 +47,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
   bool _audioConnected = false;
   bool _audioConnecting = false;
   bool _isSelfMuted = false;
+  bool _isMutedByHost = false;
+  final Set<String> _hostMutedUserIds = <String>{};
   Timer? _autoConnectRetryTimer;
 
   // ── Seat timer (co-speaker) ───────────────────────────────────────────────
@@ -73,6 +76,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     _offerSub?.cancel();
     _answerSub?.cancel();
     _candidateSub?.cancel();
+    _roomMuteUpdatedSub?.cancel();
     _callEndedSub?.cancel();
     final id = _roomId;
     if (id != null) SocketService.instance.unsubscribeRoom(id);
@@ -171,6 +175,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     _offerSub = SocketService.instance.offerStream.listen(_onOffer);
     _answerSub = SocketService.instance.answerStream.listen(_onAnswer);
     _candidateSub = SocketService.instance.candidateStream.listen(_onCandidate);
+    _roomMuteUpdatedSub = SocketService.instance.roomMuteUpdatedStream.listen(
+      _onRoomMuteUpdated,
+    );
     _callEndedSub = SocketService.instance.callEndedStream.listen(
       (_) => _onCallEnded(),
     );
@@ -541,10 +548,72 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
 
   void _toggleSelfMute() {
     if (!_isRoomActiveParticipant) return;
+    if (_isMutedByHost) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Host muted your microphone.')),
+        );
+      }
+      return;
+    }
     setState(() {
       _isSelfMuted = !_isSelfMuted;
     });
     _syncLocalAudioTrackState();
+  }
+
+  bool _canHostMuteRole(String role) {
+    return role == 'femaleSpeaker' ||
+        role == 'coSpeaker' ||
+        role == 'normalSpeaker';
+  }
+
+  void _toggleHostMuteForUser(String targetUserId) {
+    if (!_isHost || targetUserId.isEmpty) return;
+    final roomId = _roomId;
+    final currentlyMuted = _hostMutedUserIds.contains(targetUserId);
+    final nextMuted = !currentlyMuted;
+
+    setState(() {
+      if (nextMuted) {
+        _hostMutedUserIds.add(targetUserId);
+      } else {
+        _hostMutedUserIds.remove(targetUserId);
+      }
+    });
+
+    SocketService.instance.hostMuteRoomUser(
+      targetId: targetUserId,
+      muted: nextMuted,
+      roomId: roomId,
+    );
+  }
+
+  void _onRoomMuteUpdated(Map<String, dynamic> event) {
+    final targetId = event['targetId']?.toString();
+    final mutedRaw = event['muted'];
+    final roomIdFromEvent = event['roomId']?.toString();
+    final muted = mutedRaw == true || mutedRaw?.toString() == 'true';
+
+    if (targetId == null || targetId.isEmpty) return;
+    if (_roomId != null &&
+        roomIdFromEvent != null &&
+        roomIdFromEvent != _roomId) {
+      return;
+    }
+
+    if (targetId == _myId) {
+      setState(() {
+        _isMutedByHost = muted;
+        _isSelfMuted = muted;
+      });
+      _syncLocalAudioTrackState();
+      if (muted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Host muted your microphone.')),
+        );
+      }
+    }
   }
 
   void _updateAudioFlags() {
@@ -1235,9 +1304,11 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                 ...managedParticipants.map((entry) {
                   final userId = entry['userId']?.toString() ?? '';
                   final userName = entry['userName']?.toString() ?? 'User';
-                  final role = _roleLabel(
-                    entry['role']?.toString() ?? 'listener',
-                  );
+                  final roleKey = entry['role']?.toString() ?? 'listener';
+                  final role = _roleLabel(roleKey);
+                  final canHostMute =
+                      userId.isNotEmpty && _canHostMuteRole(roleKey);
+                  final isMutedByHost = _hostMutedUserIds.contains(userId);
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(12),
@@ -1254,6 +1325,16 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                             style: const TextStyle(color: Colors.white),
                           ),
                         ),
+                        if (canHostMute)
+                          IconButton(
+                            onPressed: () => _toggleHostMuteForUser(userId),
+                            icon: Icon(
+                              isMutedByHost ? Icons.mic_off : Icons.mic,
+                              color: isMutedByHost
+                                  ? Colors.redAccent
+                                  : const Color(0xFF9C4FFF),
+                            ),
+                          ),
                         IconButton(
                           onPressed: userId.isEmpty
                               ? null
