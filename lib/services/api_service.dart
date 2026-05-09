@@ -1,18 +1,13 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 
 class ApiService {
   static String get baseUrl {
     if (kIsWeb) {
       return 'http://localhost:3000';
     }
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      // Use Mac's LAN IP so a real Android device on the same WiFi can reach the backend.
-      // (Emulators use 10.0.2.2, but real devices need the host machine's actual IP.)
-      return 'http://192.168.1.16:3000';
-    }
-    return 'http://localhost:3000';
+    return 'http://chathut-app-backend.ambitiousglacier-86314c97.australiaeast.azurecontainerapps.io';
   }
 
   static String? token;
