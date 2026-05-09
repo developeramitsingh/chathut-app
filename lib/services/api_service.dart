@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
+// import 'package:flutter/foundation.dart';
 
 class ApiService {
   static String get baseUrl {
-    if (kIsWeb) {
-      return 'http://localhost:3000';
-    }
-    return 'http://chathut-app-backend.ambitiousglacier-86314c97.australiaeast.azurecontainerapps.io';
+    // if (kIsWeb) {
+    //   return 'http://localhost:3000';
+    // }
+    return 'https://chat-backend-app.ambitiousglacier-86314c97.australiaeast.azurecontainerapps.io/';
   }
 
   static String? token;
