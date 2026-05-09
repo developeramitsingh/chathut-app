@@ -169,32 +169,39 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 18),
                         Center(
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextButton(
-                                onPressed: _isLoading
-                                    ? null
-                                    : () {
-                                        Navigator.push(context, MaterialPageRoute(builder: (context) => const SignupScreen()));
-                                      },
-                                child: const Text('Create a FRND account', style: TextStyle(color: Colors.white70, fontSize: 14)),
-                              ),
-                              const SizedBox(width: 12),
-                              OutlinedButton(
-                                onPressed: _isLoading
-                                    ? null
-                                    : () {
-                                        Navigator.push(context, MaterialPageRoute(builder: (context) => const SignupScreen(isPartner: true)));
-                                      },
-                                style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(color: Color(0xFFFF5AA2)),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                ),
-                                child: const Text('Become a partner', style: TextStyle(color: Color(0xFFFF5AA2), fontSize: 14, fontWeight: FontWeight.bold)),
-                              ),
-                            ],
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isCompact = constraints.maxWidth < 380;
+                              return Wrap(
+                                alignment: WrapAlignment.center,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: isCompact ? 8 : 12,
+                                runSpacing: 8,
+                                children: [
+                                  TextButton(
+                                    onPressed: _isLoading
+                                        ? null
+                                        : () {
+                                            Navigator.push(context, MaterialPageRoute(builder: (context) => const SignupScreen()));
+                                          },
+                                    child: const Text('Create a FRND account', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                                  ),
+                                  OutlinedButton(
+                                    onPressed: _isLoading
+                                        ? null
+                                        : () {
+                                            Navigator.push(context, MaterialPageRoute(builder: (context) => const SignupScreen(isPartner: true)));
+                                          },
+                                    style: OutlinedButton.styleFrom(
+                                      side: const BorderSide(color: Color(0xFFFF5AA2)),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                    ),
+                                    child: const Text('Become a partner', style: TextStyle(color: Color(0xFFFF5AA2), fontSize: 14, fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ),
                       ],

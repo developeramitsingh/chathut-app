@@ -570,6 +570,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isCompactWidth = MediaQuery.of(context).size.width < 380;
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
@@ -831,11 +833,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 18),
                 ],
                 Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 24.0),
-                  padding: const EdgeInsets.all(20),
+                  margin: EdgeInsets.symmetric(horizontal: isCompactWidth ? 16.0 : 24.0),
+                  padding: EdgeInsets.all(_selectedIndex == 0 ? (isCompactWidth ? 14 : 18) : 20),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0D1029),
-                    borderRadius: BorderRadius.circular(26),
+                    borderRadius: BorderRadius.circular(_selectedIndex == 0 && isCompactWidth ? 22 : 26),
                     border: Border.all(color: Colors.white10),
                   ),
                   child: _activePage(),

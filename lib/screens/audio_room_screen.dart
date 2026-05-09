@@ -107,10 +107,20 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
       return Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)));
     }
 
+    final bool isNested = widget.nested;
+    final double horizontalPadding = isNested ? 12 : 16;
+    final double headerVerticalPadding = isNested ? 6 : 10;
+    final EdgeInsets listPadding = EdgeInsets.fromLTRB(horizontalPadding, isNested ? 8 : 16, horizontalPadding, isNested ? 10 : 16);
+    final double cardPadding = isNested ? 14 : 18;
+    final double cardBottomMargin = isNested ? 12 : 16;
+    final double roleGap = isNested ? 8 : 12;
+    final double roomNameFontSize = isNested ? 16 : 18;
+    final double hostFontSize = isNested ? 12 : 13;
+
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+          padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: headerVerticalPadding),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -126,7 +136,7 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
         ),
         if (widget.nested)
           ListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: listPadding,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _rooms.length,
@@ -141,8 +151,8 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
                   await _loadRooms();
                 },
                 child: Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(18),
+                  margin: EdgeInsets.only(bottom: cardBottomMargin),
+                  padding: EdgeInsets.all(cardPadding),
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
                       colors: [Color(0xFF251B52), Color(0xFF321D61)],
@@ -167,9 +177,9 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(room['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                                Text(room['name'] as String, style: TextStyle(color: Colors.white, fontSize: roomNameFontSize, fontWeight: FontWeight.w800)),
                                 const SizedBox(height: 4),
-                                Text('Host ${room['hostName']}', style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                                Text('Host ${room['hostName']}', style: TextStyle(color: Colors.white60, fontSize: hostFontSize)),
                               ],
                             ),
                           ),
@@ -187,7 +197,7 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
                       Row(
                         children: [
                           _RoleChip(label: 'Female', value: room['femaleSpeaker'] as String?),
-                          const SizedBox(width: 12),
+                          SizedBox(width: roleGap),
                           _RoleChip(label: 'Co-speaker', value: room['otherSpeaker'] as String?),
                         ],
                       ),
@@ -200,7 +210,7 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
         else
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: listPadding,
               itemCount: _rooms.length,
               itemBuilder: (context, index) {
                 final room = _rooms[index];
@@ -213,8 +223,8 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
                     await _loadRooms();
                   },
                   child: Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.all(18),
+                    margin: EdgeInsets.only(bottom: cardBottomMargin),
+                    padding: EdgeInsets.all(cardPadding),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         colors: [Color(0xFF251B52), Color(0xFF321D61)],
@@ -239,9 +249,9 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(room['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                                  Text(room['name'] as String, style: TextStyle(color: Colors.white, fontSize: roomNameFontSize, fontWeight: FontWeight.w800)),
                                   const SizedBox(height: 4),
-                                  Text('Host ${room['hostName']}', style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                                  Text('Host ${room['hostName']}', style: TextStyle(color: Colors.white60, fontSize: hostFontSize)),
                                 ],
                               ),
                             ),
@@ -259,7 +269,7 @@ class _AudioRoomScreenState extends State<AudioRoomScreen> {
                         Row(
                           children: [
                             _RoleChip(label: 'Female', value: room['femaleSpeaker'] as String?),
-                            const SizedBox(width: 12),
+                            SizedBox(width: roleGap),
                             _RoleChip(label: 'Co-speaker', value: room['otherSpeaker'] as String?),
                           ],
                         ),
